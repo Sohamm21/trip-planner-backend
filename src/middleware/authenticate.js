@@ -1,13 +1,12 @@
 const supabase = require('../lib/supabase');
 
 async function authenticate(req, res, next) {
-  const authHeader = req.headers.authorization;
+  const token = req.cookies.access_token;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+  if (!token) {
+    return res.status(401).json({ error: 'Not logged in' });
   }
 
-  const token = authHeader.split(' ')[1];
   const { data: { user }, error } = await supabase.auth.getUser(token);
 
   if (error || !user) {

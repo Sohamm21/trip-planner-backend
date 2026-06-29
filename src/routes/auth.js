@@ -34,21 +34,30 @@ router.post('/login', async (req, res) => {
 
   if (error) return res.status(401).json({ error: error.message });
 
+  res.cookie('access_token', data.session.access_token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 1000,
+  });
+
   res.json({
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
-    user: data.user,
+    user: {
+      name: data.user.user_metadata.name,
+      email: data.user.email,
+    },
   });
 });
 
 // POST /api/auth/logout
 router.post('/logout', authenticate, async (req, res) => {
-  const token = req.headers.authorization.split(' ')[1];
+  const token = req.cookies.access_token;
 
   const { error } = await supabase.auth.admin.signOut(token);
 
   if (error) return res.status(400).json({ error: error.message });
 
+  res.clearCookie('access_token');
   res.json({ message: 'Logged out successfully' });
 });
 
