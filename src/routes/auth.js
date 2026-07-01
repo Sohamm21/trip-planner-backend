@@ -3,39 +3,56 @@ const router = express.Router();
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 
-// POST /api/auth/register
+// POST /api/auth/register — step 1: sends OTP to email
 router.post('/register', async (req, res) => {
-  const { email, password, name } = req.body;
+  const { email, name, password } = req.body;
 
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'email, password and name are required' });
+  if (!email || !name || !password) {
+    return res.status(400).json({ error: 'email, name and password are required' });
   }
 
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { name } },
-  });
+  try {
+    const { error } = await supabase.auth.signInWithOtp({ email });
 
-  if (error) return res.status(400).json({ error: error.message || error.toString() });
+    if (error) return res.status(400).json({ error: error.message || error.toString() });
 
-  const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+    res.json({ message: 'OTP sent to your email. Please check your inbox.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-  if (loginError) return res.status(400).json({ error: loginError.message });
+// POST /api/auth/verify-registration — step 2: verifies OTP and creates account
+router.post('/verify-registration', async (req, res) => {
+  const { email, otp, password, name } = req.body;
 
-  res.cookie('access_token', loginData.session.access_token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 1000,
-  });
+  if (!email || !otp || !password || !name) {
+    return res.status(400).json({ error: 'email, otp, password and name are required' });
+  }
 
-  res.status(201).json({
-    user: {
-      name: loginData.user.user_metadata.name,
-      email: loginData.user.email,
-    },
-  });
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({ email, token: otp, type: 'email' });
+
+    if (error) return res.status(400).json({ error: 'Invalid or expired OTP' });
+
+    const { error: updateError } = await supabase.auth.admin.updateUserById(data.user.id, {
+      password,
+      user_metadata: { name },
+    });
+
+    if (updateError) return res.status(400).json({ error: updateError.message });
+
+    res.cookie('access_token', data.session.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 1000,
+    });
+
+    res.status(201).json({ user: { name, email } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/auth/login
@@ -46,23 +63,27 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'email and password are required' });
   }
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-  if (error) return res.status(401).json({ error: error.message });
+    if (error) return res.status(401).json({ error: error.message });
 
-  res.cookie('access_token', data.session.access_token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 1000,
-  });
+    res.cookie('access_token', data.session.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 1000,
+    });
 
-  res.json({
-    user: {
-      name: data.user.user_metadata.name,
-      email: data.user.email,
-    },
-  });
+    res.json({
+      user: {
+        name: data.user.user_metadata.name,
+        email: data.user.email,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/auth/logout
