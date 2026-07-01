@@ -19,7 +19,23 @@ router.post('/register', async (req, res) => {
 
   if (error) return res.status(400).json({ error: error.message || error.toString() });
 
-  res.status(201).json({ message: 'Account created successfully', user: data.user });
+  const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+
+  if (loginError) return res.status(400).json({ error: loginError.message });
+
+  res.cookie('access_token', loginData.session.access_token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 1000,
+  });
+
+  res.status(201).json({
+    user: {
+      name: loginData.user.user_metadata.name,
+      email: loginData.user.email,
+    },
+  });
 });
 
 // POST /api/auth/login
