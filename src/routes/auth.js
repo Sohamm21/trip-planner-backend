@@ -3,6 +3,17 @@ const router = express.Router();
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 
+const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
+
+function setAuthCookie(res, token) {
+  res.cookie('access_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: TWO_DAYS,
+  });
+}
+
 // POST /api/auth/register — step 1: sends OTP to email
 router.post('/register', async (req, res) => {
   const { email, name, password } = req.body;
@@ -42,13 +53,7 @@ router.post('/verify-registration', async (req, res) => {
 
     if (updateError) return res.status(400).json({ error: updateError.message });
 
-    res.cookie('access_token', data.session.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 1000,
-    });
-
+    setAuthCookie(res, data.session.access_token);
     res.status(201).json({ user: { name, email } });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -68,13 +73,7 @@ router.post('/login', async (req, res) => {
 
     if (error) return res.status(401).json({ error: error.message });
 
-    res.cookie('access_token', data.session.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 1000,
-    });
-
+    setAuthCookie(res, data.session.access_token);
     res.json({
       user: {
         name: data.user.user_metadata.name,
