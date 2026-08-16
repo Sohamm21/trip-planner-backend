@@ -85,4 +85,46 @@ router.post('/createTrip', async (req, res) => {
   }
 });
 
+// GET /api/trips/getTripDetails/:id — single trip details
+router.get('/getTripDetails/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { data: member, error: memberError } = await supabase
+      .from('trip_members')
+      .select('role')
+      .eq('trip_id', id)
+      .eq('user_id', req.user.id)
+      .single();
+
+    if (memberError || !member) {
+      return res.status(403).json({ error: 'You do not have access to this trip' });
+    }
+
+    const { data: trip, error } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(trip.start_date);
+    const end = new Date(trip.end_date);
+
+    let tripStatus;
+    if (end < today) tripStatus = 'COMPLETED';
+    else if (start > today) tripStatus = 'UPCOMING';
+    else tripStatus = 'ONGOING';
+
+    res.json({ trip: { ...trip, my_role: member.role, tripStatus } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
