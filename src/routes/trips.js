@@ -118,8 +118,8 @@ router.post('/createTrip', async (req, res) => {
   }
 });
 
-// GET /api/trips/getTripDetails/:id — single trip details
-router.get('/getTripDetails/:id', async (req, res) => {
+// GET /api/trips/:id/details — single trip details
+router.get('/:id/details', async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -162,8 +162,8 @@ router.get('/getTripDetails/:id', async (req, res) => {
   }
 });
 
-// PATCH /api/trips/updateTrip/:id — update name, dates, and/or cover image
-router.patch('/updateTrip/:id', upload.single('image'), async (req, res) => {
+// PATCH /api/trips/:id/update — update name, dates, and/or cover image
+router.patch('/:id/update', upload.single('image'), async (req, res) => {
   const { id } = req.params;
 
   try {
