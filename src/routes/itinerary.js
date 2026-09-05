@@ -31,7 +31,7 @@ router.get('/:id/itinerary', async (req, res) => {
 
     const { data: items, error } = await supabase
       .from('itinerary_items')
-      .select('id, name, description, scheduled_at')
+      .select('id, name, description, scheduled_at, is_active')
       .eq('trip_id', id)
       .order('scheduled_at', { ascending: true });
 
@@ -47,7 +47,7 @@ router.get('/:id/itinerary', async (req, res) => {
 // itemId present updates that activity (partial fields)
 router.post('/:id/itinerary', async (req, res) => {
   const { id } = req.params;
-  const { itemId, name, description, scheduled_at } = req.body;
+  const { itemId, name, description, scheduled_at, is_active } = req.body;
 
   try {
     const member = await checkMembership(id, req.user.id);
@@ -58,6 +58,7 @@ router.post('/:id/itinerary', async (req, res) => {
       if (name !== undefined) updates.name = name;
       if (description !== undefined) updates.description = description;
       if (scheduled_at !== undefined) updates.scheduled_at = timestampFromEpoch(scheduled_at);
+      if (is_active !== undefined) updates.is_active = !!is_active;
       updates.updated_at = new Date().toISOString();
 
       const { data: item, error } = await supabase
@@ -65,7 +66,7 @@ router.post('/:id/itinerary', async (req, res) => {
         .update(updates)
         .eq('id', itemId)
         .eq('trip_id', id)
-        .select('id, name, description, scheduled_at')
+        .select('id, name, description, scheduled_at, is_active')
         .single();
 
       if (error) return res.status(400).json({ error: error.message });
@@ -85,8 +86,9 @@ router.post('/:id/itinerary', async (req, res) => {
         description,
         scheduled_at: timestampFromEpoch(scheduled_at),
         created_by: req.user.id,
+        ...(is_active !== undefined && { is_active: !!is_active }),
       })
-      .select('id, name, description, scheduled_at')
+      .select('id, name, description, scheduled_at, is_active')
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
