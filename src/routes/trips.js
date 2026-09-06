@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
+const { requireMembership } = require('../lib/tripAccess');
 const { dateStringFromEpoch, epochFromDate } = require('../lib/dateUtils');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -119,21 +120,10 @@ router.post('/createTrip', async (req, res) => {
 });
 
 // GET /api/trips/:id/details — single trip details
-router.get('/:id/details', async (req, res) => {
+router.get('/:id/details', requireMembership(), async (req, res) => {
   const { id } = req.params;
 
   try {
-    const { data: member, error: memberError } = await supabase
-      .from('trip_members')
-      .select('role')
-      .eq('trip_id', id)
-      .eq('user_id', req.user.id)
-      .single();
-
-    if (memberError || !member) {
-      return res.status(403).json({ error: 'You do not have access to this trip' });
-    }
-
     const { data: trip, error } = await supabase
       .from('trips')
       .select('*')
@@ -156,28 +146,17 @@ router.get('/:id/details', async (req, res) => {
 
     const shaped = await withSignedCoverImage(formattedTripPayload(trip));
 
-    res.json({ trip: { ...shaped, my_role: member.role, tripStatus } });
+    res.json({ trip: { ...shaped, my_role: req.membership.role, tripStatus } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // PATCH /api/trips/:id/update — update name, dates, and/or cover image
-router.patch('/:id/update', upload.single('image'), async (req, res) => {
+router.patch('/:id/update', requireMembership(['admin']), upload.single('image'), async (req, res) => {
   const { id } = req.params;
 
   try {
-    const { data: member } = await supabase
-      .from('trip_members')
-      .select('role')
-      .eq('trip_id', id)
-      .eq('user_id', req.user.id)
-      .single();
-
-    if (!member || member.role !== 'admin') {
-      return res.status(403).json({ error: 'Only trip admins can edit this trip' });
-    }
-
     const updates = {};
     if (req.body.name) updates.name = req.body.name;
     if (req.body.start_date) updates.start_date = dateStringFromEpoch(req.body.start_date);
@@ -205,6 +184,35 @@ router.patch('/:id/update', upload.single('image'), async (req, res) => {
     if (error) return res.status(400).json({ error: error.message });
 
     res.json({ trip: await withSignedCoverImage(formattedTripPayload(trip)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/trips/:id — delete a trip. Creator-only, deliberately NOT just "any admin":
+// other collaborators can hold role: 'admin' once invites exist, but deletion stays
+// reserved for whoever originally created the trip.
+router.delete('/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { data: trip, error } = await supabase
+      .from('trips')
+      .select('id, created_by')
+      .eq('id', id)
+      .single();
+
+    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+
+    if (trip.created_by !== req.user.id) {
+      return res.status(403).json({ error: 'Only the trip creator can delete this trip' });
+    }
+
+    const { error: deleteError } = await supabase.from('trips').delete().eq('id', id);
+
+    if (deleteError) return res.status(400).json({ error: deleteError.message });
+
+    res.status(200).json({ message: 'Trip deleted', id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

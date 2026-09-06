@@ -15,6 +15,8 @@ app.use(cookieParser());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/trips', require('./routes/trips'));
 app.use('/api/trips', require('./routes/itinerary'));
+app.use('/api/trips', require('./routes/collaborators'));
+app.use('/api/invites', require('./routes/invites'));
 
 
 app.listen(PORT, () => {

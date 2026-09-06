@@ -85,13 +85,16 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /api/auth/logout
-router.post('/logout', authenticate, async (req, res) => {
+// POST /api/auth/logout — always clears the cookie, even if the session is already
+// invalid/expired server-side (that's not a reason to fail a logout request).
+router.post('/logout', async (req, res) => {
   const token = req.cookies.access_token;
 
-  const { error } = await supabase.auth.admin.signOut(token);
-
-  if (error) return res.status(400).json({ error: error.message });
+  if (token) {
+    // Best-effort server-side revoke; if it's already gone/invalid, that's fine —
+    // the outcome we want (no valid session) is already true.
+    await supabase.auth.admin.signOut(token).catch(() => {});
+  }
 
   res.clearCookie('access_token');
   res.json({ message: 'Logged out successfully' });

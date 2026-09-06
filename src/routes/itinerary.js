@@ -2,33 +2,25 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
+const { requireMembership } = require('../lib/tripAccess');
 const { timestampFromEpoch, epochFromDate } = require('../lib/dateUtils');
 
 router.use(authenticate);
 
-async function checkMembership(tripId, userId) {
-  const { data: member } = await supabase
-    .from('trip_members')
-    .select('role')
-    .eq('trip_id', tripId)
-    .eq('user_id', userId)
-    .single();
-
-  return member;
-}
+// TODO: currently any trip member (including 'viewer') can write itinerary items.
+// Gating writes to requireMembership(['admin', 'editor']) is a natural follow-up,
+// intentionally not bundled into the collaborators change so existing behavior doesn't
+// shift as a side effect.
 
 function shapeItem(item) {
   return { ...item, scheduled_at: epochFromDate(item.scheduled_at) };
 }
 
 // GET /api/trips/:id/itinerary — all activities for a trip
-router.get('/:id/itinerary', async (req, res) => {
+router.get('/:id/itinerary', requireMembership(), async (req, res) => {
   const { id } = req.params;
 
   try {
-    const member = await checkMembership(id, req.user.id);
-    if (!member) return res.status(403).json({ error: 'You do not have access to this trip' });
-
     const { data: items, error } = await supabase
       .from('itinerary_items')
       .select('id, name, description, scheduled_at, is_active')
@@ -45,14 +37,11 @@ router.get('/:id/itinerary', async (req, res) => {
 
 // POST /api/trips/:id/itinerary — upsert: no itemId in body creates a new activity,
 // itemId present updates that activity (partial fields)
-router.post('/:id/itinerary', async (req, res) => {
+router.post('/:id/itinerary', requireMembership(), async (req, res) => {
   const { id } = req.params;
   const { itemId, name, description, scheduled_at, is_active } = req.body;
 
   try {
-    const member = await checkMembership(id, req.user.id);
-    if (!member) return res.status(403).json({ error: 'You do not have access to this trip' });
-
     if (itemId) {
       const updates = {};
       if (name !== undefined) updates.name = name;
@@ -100,16 +89,13 @@ router.post('/:id/itinerary', async (req, res) => {
 });
 
 // DELETE /api/trips/:id/itinerary?itemId=:itemId
-router.delete('/:id/itinerary', async (req, res) => {
+router.delete('/:id/itinerary', requireMembership(), async (req, res) => {
   const { id } = req.params;
   const { itemId } = req.query;
 
   if (!itemId) return res.status(400).json({ error: 'itemId is required' });
 
   try {
-    const member = await checkMembership(id, req.user.id);
-    if (!member) return res.status(403).json({ error: 'You do not have access to this trip' });
-
     const { error } = await supabase.from('itinerary_items').delete().eq('id', itemId).eq('trip_id', id);
 
     if (error) return res.status(400).json({ error: error.message });
