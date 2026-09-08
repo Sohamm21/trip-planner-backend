@@ -4,6 +4,7 @@ const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 const { requireMembership } = require('../lib/tripAccess');
 const { epochFromDate } = require('../lib/dateUtils');
+const { sendInviteEmail } = require('../lib/email');
 
 router.use(authenticate);
 
@@ -118,6 +119,18 @@ router.post('/:id/collaborators/invite', requireMembership(['admin']), async (re
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
+
+    const { data: trip } = await supabase.from('trips').select('name').eq('id', id).single();
+    const inviterName = req.user.user_metadata?.name || req.user.email;
+
+    const { ok, error: emailError } = await sendInviteEmail({
+      to: normalizedEmail,
+      tripName: trip?.name || 'a trip',
+      inviterName,
+      role,
+    });
+
+    if (!ok) console.warn(`[invite email] failed to send to ${normalizedEmail}: ${emailError}`);
 
     res.status(201).json({ invite: shapeInvite({ ...invite, inviter: null }) });
   } catch (err) {

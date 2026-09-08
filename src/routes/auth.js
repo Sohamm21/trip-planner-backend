@@ -53,7 +53,14 @@ router.post('/verify-registration', async (req, res) => {
 
     if (updateError) return res.status(400).json({ error: updateError.message });
 
-    setAuthCookie(res, data.session.access_token);
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError) return res.status(400).json({ error: signInError.message });
+
+    setAuthCookie(res, signInData.session.access_token);
     res.status(201).json({ user: { name, email } });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -69,9 +76,19 @@ router.post('/login', async (req, res) => {
   }
 
   try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', String(email).trim().toLowerCase())
+      .single();
+
+    if (!profile) {
+      return res.status(404).json({ error: 'No account found with this email', code: 'USER_NOT_FOUND' });
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (error) return res.status(401).json({ error: error.message });
+    if (error) return res.status(401).json({ error: 'Invalid credentials', code: 'INVALID_CREDENTIALS' });
 
     setAuthCookie(res, data.session.access_token);
     res.json({

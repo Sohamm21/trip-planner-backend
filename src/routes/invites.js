@@ -28,8 +28,9 @@ function shapeInvite(invite) {
   };
 }
 
-// GET /api/invites/mine — pending invites addressed to the logged-in user
-router.get('/mine', async (req, res) => {
+// GET /api/invites — pending invites addressed to the logged-in user. No "/mine" suffix
+// needed: every route on this router is already identity-scoped to req.user.
+router.get('/', async (req, res) => {
   try {
     const { data: invites, error } = await supabase
       .from('trip_invites')

@@ -1,0 +1,1 @@
+{{inviterName}} invited you to "{{tripName}}" on Voyage as a {{role}}. Log in at {{frontendUrl}} to accept or decline.
