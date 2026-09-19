@@ -86,11 +86,17 @@ router.get('/getTrips', async (req, res) => {
 });
 
 // POST /api/trips/createTrip — create a new trip
-router.post('/createTrip', async (req, res) => {
-  const { name, start_date, end_date } = req.body;
+// currency is set-once here — there's deliberately no way to change it later (e.g. via
+// PATCH /:id/update), since expense splits/balances assume a trip's currency never moves.
+router.post('/createTrip', upload.single('image'), async (req, res) => {
+  const { name, start_date, end_date, currency } = req.body;
 
   if (!name || !start_date || !end_date) {
     return res.status(400).json({ error: 'name, start_date and end_date are required' });
+  }
+
+  if (currency && String(currency).length !== 3) {
+    return res.status(400).json({ error: 'currency must be a 3-letter code (e.g. INR, USD)' });
   }
 
   try {
@@ -101,6 +107,7 @@ router.post('/createTrip', async (req, res) => {
         start_date: dateStringFromEpoch(start_date),
         end_date: dateStringFromEpoch(end_date),
         created_by: req.user.id,
+        ...(currency && { currency: currency.toUpperCase() }),
       })
       .select()
       .single();
@@ -113,7 +120,32 @@ router.post('/createTrip', async (req, res) => {
 
     if (memberError) return res.status(400).json({ error: memberError.message });
 
-    res.status(201).json({ trip: formattedTripPayload(trip) });
+    // The cover image path is keyed by trip id (see PATCH /:id/update below), so
+    // it can only be uploaded after the insert above produces one.
+    let finalTrip = trip;
+
+    if (req.file) {
+      const filePath = `${trip.id}/${Date.now()}.${req.file.mimetype.split('/')[1]}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('trip-covers')
+        .upload(filePath, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
+
+      if (uploadError) return res.status(400).json({ error: uploadError.message });
+
+      const { data: updatedTrip, error: coverUpdateError } = await supabase
+        .from('trips')
+        .update({ cover_image: filePath })
+        .eq('id', trip.id)
+        .select()
+        .single();
+
+      if (coverUpdateError) return res.status(400).json({ error: coverUpdateError.message });
+
+      finalTrip = updatedTrip;
+    }
+
+    res.status(201).json({ trip: await withSignedCoverImage(formattedTripPayload(finalTrip)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
