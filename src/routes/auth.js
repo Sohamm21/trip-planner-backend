@@ -60,6 +60,75 @@ router.post('/verify-registration', async (req, res) => {
   }
 });
 
+// POST /api/auth/forgot-password — sends an OTP to the account's email so it
+// can be used (via /reset-password) to set a new password.
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'email is required' });
+  }
+
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', String(email).trim().toLowerCase())
+      .single();
+
+    if (!profile) {
+      return res.status(404).json({ error: 'No account found with this email', code: 'USER_NOT_FOUND' });
+    }
+
+    const { error } = await supabase.auth.signInWithOtp({ email });
+
+    if (error) return res.status(400).json({ error: error.message || error.toString() });
+
+    res.json({ message: 'OTP sent to your email. Please check your inbox.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/auth/reset-password — verifies the OTP from /forgot-password and
+// sets a new password, then signs the user in.
+router.post('/reset-password', async (req, res) => {
+  const { email, otp, password } = req.body;
+
+  if (!email || !otp || !password) {
+    return res.status(400).json({ error: 'email, otp and password are required' });
+  }
+
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({ email, token: otp, type: 'email' });
+
+    if (error) return res.status(400).json({ error: 'Invalid or expired OTP' });
+
+    const { error: updateError } = await supabase.auth.admin.updateUserById(data.user.id, {
+      password,
+    });
+
+    if (updateError) return res.status(400).json({ error: updateError.message });
+
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError) return res.status(400).json({ error: signInError.message });
+
+    setAuthCookie(res, signInData.session.access_token);
+    res.json({
+      user: {
+        name: signInData.user.user_metadata?.name,
+        email: signInData.user.email,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
