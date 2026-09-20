@@ -4,6 +4,11 @@ const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 const { requireMembership } = require('../lib/tripAccess');
 const { timestampFromEpoch, epochFromDate } = require('../lib/dateUtils');
+const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+const ITINERARY_FILTER_FIELDS = { isActive: 'is_active' };
 
 router.use(authenticate);
 
@@ -16,20 +21,44 @@ function shapeItem(item) {
   return { ...item, scheduled_at: epochFromDate(item.scheduled_at) };
 }
 
-// GET /api/trips/:id/itinerary — all activities for a trip
+// GET /api/trips/:id/itinerary — all activities for a trip. Paginated + filterable via
+// ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"isActive","operator":"eq","value":true}]}.
 router.get('/:id/itinerary', requireMembership(), async (req, res) => {
   const { id } = req.params;
 
+  const { jsonQuery, error: queryError } = parseJsonQuery(req);
+  if (queryError) return res.status(400).json({ error: queryError });
+
+  const page = Math.max(parseInt(jsonQuery.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(jsonQuery.limit, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+
   try {
-    const { data: items, error } = await supabase
+    let query = supabase
       .from('itinerary_items')
-      .select('id, name, description, scheduled_at, is_active')
-      .eq('trip_id', id)
-      .order('scheduled_at', { ascending: true });
+      .select('id, name, description, scheduled_at, is_active', { count: 'exact' })
+      .eq('trip_id', id);
+
+    try {
+      query = applyFilters(query, jsonQuery.filters, ITINERARY_FILTER_FIELDS);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const from = (page - 1) * limit;
+    const { data: items, error, count } = await query
+      .order('scheduled_at', { ascending: true })
+      .range(from, from + limit - 1);
 
     if (error) return res.status(400).json({ error: error.message });
 
-    res.json({ itinerary: items.map(shapeItem) });
+    const total = count ?? 0;
+    res.json({
+      itinerary: items.map(shapeItem),
+      page,
+      limit,
+      total,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -88,10 +117,14 @@ router.post('/:id/itinerary', requireMembership(), async (req, res) => {
   }
 });
 
-// DELETE /api/trips/:id/itinerary?itemId=:itemId
+// DELETE /api/trips/:id/itinerary?jsonQuery={"itemId":"..."}
 router.delete('/:id/itinerary', requireMembership(), async (req, res) => {
   const { id } = req.params;
-  const { itemId } = req.query;
+
+  const { jsonQuery, error: queryError } = parseJsonQuery(req);
+  if (queryError) return res.status(400).json({ error: queryError });
+
+  const { itemId } = jsonQuery;
 
   if (!itemId) return res.status(400).json({ error: 'itemId is required' });
 

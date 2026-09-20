@@ -5,6 +5,13 @@ const authenticate = require('../middleware/authenticate');
 const { requireMembership } = require('../lib/tripAccess');
 const { epochFromDate } = require('../lib/dateUtils');
 const { sendInviteEmail } = require('../lib/email');
+const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
+
+// Both members and pendingInvites are filterable by role; no pagination here since this
+// endpoint returns two lists in one response rather than a single paginated collection —
+// collaborator counts are small enough that pagination wouldn't add real value.
+const MEMBER_FILTER_FIELDS = { role: 'role' };
+const INVITE_FILTER_FIELDS = { role: 'role' };
 
 router.use(authenticate);
 
@@ -28,24 +35,37 @@ function shapeInvite(invite) {
   };
 }
 
-// GET /api/trips/:id/collaborators — current members + pending invites
+// GET /api/trips/:id/collaborators — current members + pending invites. Filterable via
+// ?jsonQuery={"filters":[{"key":"role","operator":"eq","value":"admin"}]} (applies to both lists).
 router.get('/:id/collaborators', requireMembership(), async (req, res) => {
   const { id } = req.params;
 
+  const { jsonQuery, error: queryError } = parseJsonQuery(req);
+  if (queryError) return res.status(400).json({ error: queryError });
+
   try {
-    const { data: members, error: membersError } = await supabase
+    let membersQuery = supabase
       .from('trip_members')
       .select('id, user_id, role, profiles!trip_members_user_id_profiles_fkey(name, email)')
       .eq('trip_id', id);
 
-    if (membersError) return res.status(400).json({ error: membersError.message });
-
-    const { data: invites, error: invitesError } = await supabase
+    let invitesQuery = supabase
       .from('trip_invites')
       .select('id, invited_email, role, created_at, inviter:profiles!trip_invites_invited_by_fkey(name, email)')
       .eq('trip_id', id)
       .eq('status', 'pending');
 
+    try {
+      membersQuery = applyFilters(membersQuery, jsonQuery.filters, MEMBER_FILTER_FIELDS);
+      invitesQuery = applyFilters(invitesQuery, jsonQuery.filters, INVITE_FILTER_FIELDS);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const { data: members, error: membersError } = await membersQuery;
+    if (membersError) return res.status(400).json({ error: membersError.message });
+
+    const { data: invites, error: invitesError } = await invitesQuery;
     if (invitesError) return res.status(400).json({ error: invitesError.message });
 
     res.json({

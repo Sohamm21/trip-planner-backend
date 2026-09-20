@@ -3,6 +3,11 @@ const router = express.Router();
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 const { epochFromDate } = require('../lib/dateUtils');
+const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+const INVITE_FILTER_FIELDS = { role: 'role' };
 
 // Note: unlike collaborators.js, these routes are gated by IDENTITY (does this invite
 // belong to req.user), not trip membership — the invitee isn't a trip member yet by
@@ -29,22 +34,45 @@ function shapeInvite(invite) {
 }
 
 // GET /api/invites — pending invites addressed to the logged-in user. No "/mine" suffix
-// needed: every route on this router is already identity-scoped to req.user.
+// needed: every route on this router is already identity-scoped to req.user. Paginated +
+// filterable via ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"role","operator":"eq","value":"editor"}]}.
 router.get('/', async (req, res) => {
+  const { jsonQuery, error: queryError } = parseJsonQuery(req);
+  if (queryError) return res.status(400).json({ error: queryError });
+
+  const page = Math.max(parseInt(jsonQuery.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(jsonQuery.limit, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+
   try {
-    const { data: invites, error } = await supabase
+    let query = supabase
       .from('trip_invites')
       .select(`
         id, role, created_at,
         trips ( id, name, destination, start_date, end_date ),
         inviter:profiles!trip_invites_invited_by_fkey ( name, email )
-      `)
+      `, { count: 'exact' })
       .eq('invited_user_id', req.user.id)
       .eq('status', 'pending');
 
+    try {
+      query = applyFilters(query, jsonQuery.filters, INVITE_FILTER_FIELDS);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const from = (page - 1) * limit;
+    const { data: invites, error, count } = await query.range(from, from + limit - 1);
+
     if (error) return res.status(400).json({ error: error.message });
 
-    res.json({ invites: invites.map(shapeInvite) });
+    const total = count ?? 0;
+    res.json({
+      invites: invites.map(shapeInvite),
+      page,
+      limit,
+      total,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

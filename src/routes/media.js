@@ -4,11 +4,13 @@ const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 const { requireMembership } = require('../lib/tripAccess');
 const { epochFromDate } = require('../lib/dateUtils');
+const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
 
 const MEDIA_MAX_FILES = 10;
 const MEDIA_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour, matches trip-covers
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
+const MEDIA_FILTER_FIELDS = { uploadedBy: 'uploaded_by' }; // public key -> real column
 
 router.use(authenticate);
 
@@ -130,17 +132,26 @@ router.post('/:id/media/confirm', requireMembership(['admin', 'editor']), async 
   }
 });
 
-// GET /api/trips/:id/media — any member (including viewer). Paginated, filterable by uploader.
+// GET /api/trips/:id/media — any member (including viewer). Paginated + filterable via
+// ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"uploadedBy","operator":"eq","value":"..."}]}
+// (see lib/queryFilters.js).
 router.get('/:id/media', requireMembership(), async (req, res) => {
   const { id } = req.params;
-  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
-  const { uploadedBy } = req.query;
+
+  const { jsonQuery, error: queryError } = parseJsonQuery(req);
+  if (queryError) return res.status(400).json({ error: queryError });
+
+  const page = Math.max(parseInt(jsonQuery.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(jsonQuery.limit, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
 
   try {
     let query = supabase.from('media').select(MEDIA_SELECT, { count: 'exact' }).eq('trip_id', id);
 
-    if (uploadedBy) query = query.eq('uploaded_by', uploadedBy);
+    try {
+      query = applyFilters(query, jsonQuery.filters, MEDIA_FILTER_FIELDS);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
 
     const from = (page - 1) * limit;
     const { data: rows, error, count } = await query

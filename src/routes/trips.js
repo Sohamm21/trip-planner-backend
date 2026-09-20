@@ -5,6 +5,11 @@ const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 const { requireMembership } = require('../lib/tripAccess');
 const { dateStringFromEpoch, epochFromDate } = require('../lib/dateUtils');
+const { parseJsonQuery, applyFiltersInMemory } = require('../lib/queryFilters');
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+const TRIP_FILTER_FIELDS = { status: 'status', tripStatus: 'tripStatus' };
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -36,8 +41,16 @@ async function withSignedCoverImage(trip) {
   return { ...trip, cover_image: data.signedUrl };
 }
 
-// GET /api/trips — all trips where the logged-in user is a member
+// GET /api/trips — all trips where the logged-in user is a member. Paginated + filterable
+// via ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"tripStatus","operator":"eq","value":"UPCOMING"}]}.
+// `counts` always reflects ALL of the user's trips, unaffected by filters/pagination.
 router.get('/getTrips', async (req, res) => {
+  const { jsonQuery, error: queryError } = parseJsonQuery(req);
+  if (queryError) return res.status(400).json({ error: queryError });
+
+  const page = Math.max(parseInt(jsonQuery.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(jsonQuery.limit, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+
   try {
     const { data, error } = await supabase
       .from('trip_members')
@@ -79,7 +92,24 @@ router.get('/getTrips', async (req, res) => {
       { UPCOMING: 0, ONGOING: 0, COMPLETED: 0 }
     );
 
-    res.json({ trips, counts });
+    let filtered;
+    try {
+      filtered = applyFiltersInMemory(trips, jsonQuery.filters, TRIP_FILTER_FIELDS);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const total = filtered.length;
+    const from = (page - 1) * limit;
+
+    res.json({
+      trips: filtered.slice(from, from + limit),
+      counts,
+      page,
+      limit,
+      total,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
