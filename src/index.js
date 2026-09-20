@@ -17,6 +17,7 @@ app.use('/api/trips', require('./routes/trips'));
 app.use('/api/trips', require('./routes/itinerary'));
 app.use('/api/trips', require('./routes/collaborators'));
 app.use('/api/trips', require('./routes/expenses'));
+app.use('/api/trips', require('./routes/media'));
 app.use('/api/invites', require('./routes/invites'));
 
 
