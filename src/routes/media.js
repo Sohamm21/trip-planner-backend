@@ -16,6 +16,45 @@ router.use(authenticate);
 
 const MEDIA_SELECT = 'id, trip_id, storage_path, caption, content_type, file_size_bytes, uploaded_by, created_at, profiles(name, email)';
 
+// uploaded_by is a user id, but the frontend's filter UI shows members by
+// email, so `uploadedBy` filter values arrive as emails. Resolves them to
+// the matching profile's id before applyFilters compares them against the
+// raw column. An email with no matching profile is left as-is — it can
+// never equal a real uuid, so that filter just degrades to "no match"
+// rather than erroring the whole request.
+async function resolveUploadedByEmails(filters) {
+  if (!Array.isArray(filters) || filters.length === 0) return filters;
+
+  const emails = new Set();
+  filters.forEach((f) => {
+    if (f.key !== 'uploadedBy') return;
+    (Array.isArray(f.value) ? f.value : [f.value]).forEach((v) => {
+      if (typeof v === 'string') emails.add(v);
+    });
+  });
+
+  if (emails.size === 0) return filters;
+
+  const { data: profiles, error } = await supabase
+    .from('profiles')
+    .select('id, email')
+    .in('email', Array.from(emails));
+
+  if (error) throw new Error(error.message);
+
+  const idByEmail = new Map((profiles || []).map((p) => [p.email, p.id]));
+
+  return filters.map((f) => {
+    if (f.key !== 'uploadedBy') return f;
+
+    if (Array.isArray(f.value)) {
+      return { ...f, value: f.value.map((v) => idByEmail.get(v)).filter(Boolean) };
+    }
+
+    return { ...f, value: idByEmail.get(f.value) ?? f.value };
+  });
+}
+
 function shapeMedia(row, signedUrl) {
   return {
     id: row.id,
@@ -133,8 +172,8 @@ router.post('/:id/media/confirm', requireMembership(['admin', 'editor']), async 
 });
 
 // GET /api/trips/:id/media — any member (including viewer). Paginated + filterable via
-// ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"uploadedBy","operator":"eq","value":"..."}]}
-// (see lib/queryFilters.js).
+// ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"uploadedBy","operator":"eq","value":"someone@example.com"}]}
+// (see lib/queryFilters.js) — uploadedBy takes an email; resolved to the underlying user id below.
 router.get('/:id/media', requireMembership(), async (req, res) => {
   const { id } = req.params;
 
@@ -148,7 +187,8 @@ router.get('/:id/media', requireMembership(), async (req, res) => {
     let query = supabase.from('media').select(MEDIA_SELECT, { count: 'exact' }).eq('trip_id', id);
 
     try {
-      query = applyFilters(query, jsonQuery.filters, MEDIA_FILTER_FIELDS);
+      const resolvedFilters = await resolveUploadedByEmails(jsonQuery.filters);
+      query = applyFilters(query, resolvedFilters, MEDIA_FILTER_FIELDS);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
     }
