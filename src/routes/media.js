@@ -7,6 +7,7 @@ const { epochFromDate } = require('../lib/dateUtils');
 const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
 
 const MEDIA_MAX_FILES = 10;
+const MEDIA_MAX_PER_USER = 20; // per trip
 const MEDIA_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour, matches trip-covers
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -80,6 +81,21 @@ router.post('/:id/media/upload-urls', requireMembership(['admin', 'editor']), as
   }
 
   try {
+    const { count: existingCount, error: countError } = await supabase
+      .from('media')
+      .select('id', { count: 'exact', head: true })
+      .eq('trip_id', id)
+      .eq('uploaded_by', req.user.id);
+
+    if (countError) return res.status(400).json({ error: countError.message });
+
+    if ((existingCount ?? 0) + count > MEDIA_MAX_PER_USER) {
+      const remaining = Math.max(MEDIA_MAX_PER_USER - (existingCount ?? 0), 0);
+      return res.status(400).json({
+        error: `You can upload up to ${MEDIA_MAX_PER_USER} images per trip. You have ${remaining} left.`,
+      });
+    }
+
     const uploads = [];
 
     for (let i = 0; i < count; i++) {

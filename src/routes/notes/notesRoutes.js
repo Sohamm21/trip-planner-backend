@@ -53,8 +53,9 @@ router.post('/:id/notes', requireMembership(['admin', 'editor']), async (req, re
   }
 });
 
-// PATCH /api/trips/:id/notes/:noteId — creator-only, matches places/stays' rule (not role-based).
-// Handles both content edits and pin toggling.
+// PATCH /api/trips/:id/notes/:noteId — content edits are creator-only
+// (matches places/stays' rule, not role-based); pinning is a lighter-weight
+// action any trip member can do to anyone's note, so it's exempt from that check.
 router.patch('/:id/notes/:noteId', requireMembership(), async (req, res) => {
   const { id, noteId } = req.params;
 
@@ -71,7 +72,8 @@ router.patch('/:id/notes/:noteId', requireMembership(), async (req, res) => {
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Note not found' });
 
-    if (existing.created_by !== req.user.id) {
+    const isEditingContent = body.content !== undefined;
+    if (isEditingContent && existing.created_by !== req.user.id) {
       return res.status(403).json({ error: 'Only the person who created this note can edit it' });
     }
 
