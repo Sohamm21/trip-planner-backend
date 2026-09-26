@@ -20,6 +20,7 @@ app.use('/api/trips', require('./routes/expenses'));
 app.use('/api/trips', require('./routes/media'));
 app.use('/api/trips', require('./routes/stays'));
 app.use('/api/trips', require('./routes/places'));
+app.use('/api/trips', require('./routes/notes'));
 app.use('/api/invites', require('./routes/invites'));
 
 
