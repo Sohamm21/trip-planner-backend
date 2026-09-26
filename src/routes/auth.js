@@ -4,6 +4,7 @@ const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 
 const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
+const OAUTH_PROVIDERS = ['google'];
 
 function setAuthCookie(res, token) {
   res.cookie('access_token', token, {
@@ -163,6 +164,65 @@ router.post('/login', async (req, res) => {
     res.json({
       user: {
         name: data.user.user_metadata.name,
+        email: data.user.email,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/auth/oauth/:provider — returns the provider's OAuth URL for the frontend
+// to redirect the browser to. Doesn't redirect itself: the frontend calls this via
+// fetch (it needs the JSON url), then does `window.location.href = url` itself.
+router.get('/oauth/:provider', async (req, res) => {
+  const { provider } = req.params;
+
+  if (!OAUTH_PROVIDERS.includes(provider)) {
+    return res.status(400).json({ error: `Unsupported provider: ${provider}` });
+  }
+
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: process.env.OAUTH_REDIRECT_URL,
+        skipBrowserRedirect: true, // we just want the URL back as JSON, not a 302
+      },
+    });
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    res.json({ url: data.url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/auth/oauth/session — after the OAuth redirect lands back on the frontend
+// with #access_token=... in the URL fragment, the frontend reads that fragment
+// (server never sees it) and posts the token here. We verify it ourselves via
+// getUser rather than trusting it, then set the same cookie /login sets. The
+// public.profiles row for a first-time Google user is created automatically by
+// the on_auth_user_created DB trigger — nothing to do for that here.
+router.post('/oauth/session', async (req, res) => {
+  const { access_token } = req.body;
+
+  if (!access_token) {
+    return res.status(400).json({ error: 'access_token is required' });
+  }
+
+  try {
+    const { data, error } = await supabase.auth.getUser(access_token);
+
+    if (error || !data.user) {
+      return res.status(401).json({ error: 'Invalid or expired token', code: 'UNAUTHORIZED' });
+    }
+
+    setAuthCookie(res, access_token);
+    res.json({
+      user: {
+        name: data.user.user_metadata?.name,
         email: data.user.email,
       },
     });

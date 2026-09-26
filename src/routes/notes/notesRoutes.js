@@ -53,10 +53,10 @@ router.post('/:id/notes', requireMembership(['admin', 'editor']), async (req, re
   }
 });
 
-// PATCH /api/trips/:id/notes/:noteId — content edits are creator-only
-// (matches places/stays' rule, not role-based); pinning is a lighter-weight
-// action any trip member can do to anyone's note, so it's exempt from that check.
-router.patch('/:id/notes/:noteId', requireMembership(), async (req, res) => {
+// PATCH /api/trips/:id/notes/:noteId — admin/editor only (viewers can't manage
+// notes at all); content edits are further restricted to the note's creator
+// (matches places/stays' rule), while pinning is open to any admin/editor.
+router.patch('/:id/notes/:noteId', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id, noteId } = req.params;
 
   const { value: body, error: validationError } = validateBody(updateNoteSchema, req.body);
@@ -96,8 +96,10 @@ router.patch('/:id/notes/:noteId', requireMembership(), async (req, res) => {
   }
 });
 
-// DELETE /api/trips/:id/notes/:noteId — creator-only.
-router.delete('/:id/notes/:noteId', requireMembership(), async (req, res) => {
+// DELETE /api/trips/:id/notes/:noteId — admin/editor only, and creator-only
+// within that (a viewer can't delete even a note they created before being
+// demoted).
+router.delete('/:id/notes/:noteId', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id, noteId } = req.params;
 
   try {

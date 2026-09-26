@@ -102,8 +102,9 @@ router.post('/:id/stays', requireMembership(['admin', 'editor']), async (req, re
   }
 });
 
-// PATCH /api/trips/:id/stays/:stayId — creator-only.
-router.patch('/:id/stays/:stayId', requireMembership(), async (req, res) => {
+// PATCH /api/trips/:id/stays/:stayId — admin/editor only, any of theirs can edit any
+// booking (not creator-restricted — same reasoning as POST).
+router.patch('/:id/stays/:stayId', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id, stayId } = req.params;
 
   const { value: body, error: validationError } = validateBody(updateStaySchema, req.body);
@@ -120,10 +121,6 @@ router.patch('/:id/stays/:stayId', requireMembership(), async (req, res) => {
       .single();
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Stay not found' });
-
-    if (existing.created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Only the person who created this booking can edit it' });
-    }
 
     // both-provided-together case is already covered by the schema's cross-field check —
     // this only covers a lone end_date compared against the already-stored start_date.
@@ -197,8 +194,9 @@ router.patch('/:id/stays/:stayId', requireMembership(), async (req, res) => {
   }
 });
 
-// DELETE /api/trips/:id/stays/:stayId — creator-only. Deletes the linked expense too.
-router.delete('/:id/stays/:stayId', requireMembership(), async (req, res) => {
+// DELETE /api/trips/:id/stays/:stayId — admin/editor only, not creator-restricted.
+// Deletes the linked expense too.
+router.delete('/:id/stays/:stayId', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id, stayId } = req.params;
 
   try {
@@ -210,10 +208,6 @@ router.delete('/:id/stays/:stayId', requireMembership(), async (req, res) => {
       .single();
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Stay not found' });
-
-    if (existing.created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Only the person who created this booking can delete it' });
-    }
 
     if (existing.expense_id) {
       await supabase.from('expenses').delete().eq('id', existing.expense_id); // cascades expense_splits

@@ -58,8 +58,9 @@ router.post('/:id/places', requireMembership(['admin', 'editor']), async (req, r
   }
 });
 
-// PATCH /api/trips/:id/places/:placeId — creator-only, matches stays' rule (not role-based).
-router.patch('/:id/places/:placeId', requireMembership(), async (req, res) => {
+// PATCH /api/trips/:id/places/:placeId — admin/editor only, any of theirs can edit any
+// place (not creator-restricted — same reasoning as POST).
+router.patch('/:id/places/:placeId', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id, placeId } = req.params;
 
   const { value: body, error: validationError } = validateBody(updatePlaceSchema, req.body);
@@ -74,10 +75,6 @@ router.patch('/:id/places/:placeId', requireMembership(), async (req, res) => {
       .single();
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Place not found' });
-
-    if (existing.created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Only the person who added this place can edit it' });
-    }
 
     const updates = { updated_at: new Date().toISOString() };
     if (body.name !== undefined) updates.name = body.name;
@@ -104,8 +101,8 @@ router.patch('/:id/places/:placeId', requireMembership(), async (req, res) => {
   }
 });
 
-// DELETE /api/trips/:id/places/:placeId — creator-only.
-router.delete('/:id/places/:placeId', requireMembership(), async (req, res) => {
+// DELETE /api/trips/:id/places/:placeId — admin/editor only, not creator-restricted.
+router.delete('/:id/places/:placeId', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id, placeId } = req.params;
 
   try {
@@ -117,10 +114,6 @@ router.delete('/:id/places/:placeId', requireMembership(), async (req, res) => {
       .single();
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Place not found' });
-
-    if (existing.created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Only the person who added this place can delete it' });
-    }
 
     const { error } = await supabase.from('places').delete().eq('id', placeId);
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const { compareAsc, compareDesc } = require('date-fns');
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 const { requireMembership } = require('../lib/tripAccess');
@@ -14,6 +15,7 @@ const TRIP_FILTER_FIELDS = { status: 'status', tripStatus: 'tripStatus' };
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const COVER_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour
+const DEFAULT_COVER_IMAGE = 'https://res.cloudinary.com/dyrv985gb/image/upload/v1790399857/BhatakGo/mountains_night.jpg';
 
 router.use(authenticate);
 
@@ -29,8 +31,10 @@ function formattedTripPayload(trip) {
 }
 
 // cover_image is stored as a private storage path — replace it with a short-lived signed URL.
+// The default cover (no upload at creation) is a plain external URL, not a storage path — pass it through as-is.
 async function withSignedCoverImage(trip) {
   if (!trip.cover_image) return trip;
+  if (/^https?:\/\//i.test(trip.cover_image)) return trip;
 
   const { data, error } = await supabase.storage
     .from('trip-covers')
@@ -84,6 +88,15 @@ router.get('/getTrips', async (req, res) => {
       })
     );
 
+    // Ongoing/upcoming sort soonest-starting first; completed sorts most-recently-finished
+    // first. Different statuses aren't compared against each other — the frontend splits
+    // trips into per-status sections anyway, so only the order within each status matters.
+    trips.sort((a, b) => {
+      if (a.tripStatus !== b.tripStatus) return 0;
+      if (a.tripStatus === 'COMPLETED') return compareDesc(new Date(a.end_date), new Date(b.end_date));
+      return compareAsc(new Date(a.start_date), new Date(b.start_date));
+    });
+
     const counts = trips.reduce(
       (acc, trip) => {
         acc[trip.tripStatus] = (acc[trip.tripStatus] || 0) + 1;
@@ -119,7 +132,7 @@ router.get('/getTrips', async (req, res) => {
 // currency is set-once here — there's deliberately no way to change it later (e.g. via
 // PATCH /:id/update), since expense splits/balances assume a trip's currency never moves.
 router.post('/createTrip', upload.single('image'), async (req, res) => {
-  const { name, start_date, end_date, currency } = req.body;
+  const { name, destination, start_date, end_date, currency, image_url } = req.body;
 
   if (!name || !start_date || !end_date) {
     return res.status(400).json({ error: 'name, start_date and end_date are required' });
@@ -137,7 +150,9 @@ router.post('/createTrip', upload.single('image'), async (req, res) => {
         start_date: dateStringFromEpoch(start_date),
         end_date: dateStringFromEpoch(end_date),
         created_by: req.user.id,
+        ...(destination && { destination }),
         ...(currency && { currency: currency.toUpperCase() }),
+        ...(!req.file && { cover_image: image_url || DEFAULT_COVER_IMAGE }),
       })
       .select()
       .single();

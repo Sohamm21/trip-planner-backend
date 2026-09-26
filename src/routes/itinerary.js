@@ -12,11 +12,6 @@ const ITINERARY_FILTER_FIELDS = { isActive: 'is_active' };
 
 router.use(authenticate);
 
-// TODO: currently any trip member (including 'viewer') can write itinerary items.
-// Gating writes to requireMembership(['admin', 'editor']) is a natural follow-up,
-// intentionally not bundled into the collaborators change so existing behavior doesn't
-// shift as a side effect.
-
 function shapeItem(item) {
   return { ...item, scheduled_at: epochFromDate(item.scheduled_at) };
 }
@@ -64,9 +59,10 @@ router.get('/:id/itinerary', requireMembership(), async (req, res) => {
   }
 });
 
-// POST /api/trips/:id/itinerary — upsert: no itemId in body creates a new activity,
-// itemId present updates that activity (partial fields)
-router.post('/:id/itinerary', requireMembership(), async (req, res) => {
+// POST /api/trips/:id/itinerary — admin/editor only. Upsert: no itemId in body creates
+// a new activity, itemId present updates that activity (partial fields, including the
+// is_active "mark complete" toggle).
+router.post('/:id/itinerary', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id } = req.params;
   const { itemId, name, description, scheduled_at, is_active } = req.body;
 
@@ -117,8 +113,8 @@ router.post('/:id/itinerary', requireMembership(), async (req, res) => {
   }
 });
 
-// DELETE /api/trips/:id/itinerary?jsonQuery={"itemId":"..."}
-router.delete('/:id/itinerary', requireMembership(), async (req, res) => {
+// DELETE /api/trips/:id/itinerary?jsonQuery={"itemId":"..."} — admin/editor only.
+router.delete('/:id/itinerary', requireMembership(['admin', 'editor']), async (req, res) => {
   const { id } = req.params;
 
   const { jsonQuery, error: queryError } = parseJsonQuery(req);
