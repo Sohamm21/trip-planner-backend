@@ -266,6 +266,21 @@ router.patch('/:id/update', requireMembership(['admin']), upload.single('image')
   }
 });
 
+// Removes every stored object under a trip's folder in a bucket (both
+// trip-covers and trip-media key their files as `${tripId}/...`). Best-effort:
+// a storage failure here shouldn't block the trip row (and everything that
+// cascades from it) from being deleted.
+async function clearTripBucketFolder(bucket, tripId) {
+  try {
+    const { data: files, error } = await supabase.storage.from(bucket).list(tripId);
+    if (error || !files || files.length === 0) return;
+
+    await supabase.storage.from(bucket).remove(files.map((file) => `${tripId}/${file.name}`));
+  } catch (err) {
+    console.error(`Failed to clear ${bucket}/${tripId}:`, err);
+  }
+}
+
 // DELETE /api/trips/:id — delete a trip. Creator-only, deliberately NOT just "any admin":
 // other collaborators can hold role: 'admin' once invites exist, but deletion stays
 // reserved for whoever originally created the trip.
@@ -289,7 +304,44 @@ router.delete('/:id', async (req, res) => {
 
     if (deleteError) return res.status(400).json({ error: deleteError.message });
 
+    await Promise.all([
+      clearTripBucketFolder('trip-covers', id),
+      clearTripBucketFolder('trip-media', id),
+    ]);
+
     res.status(200).json({ message: 'Trip deleted', id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/trips/:id/leave — any member removes themselves from a trip. The
+// creator can't leave this way (they'd orphan the trip with no one able to
+// delete it) — they must delete the trip instead.
+router.post('/:id/leave', requireMembership(), async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { data: trip, error } = await supabase
+      .from('trips')
+      .select('id, created_by')
+      .eq('id', id)
+      .single();
+
+    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+
+    if (trip.created_by === req.user.id) {
+      return res.status(400).json({ error: 'The trip creator can\'t leave — delete the trip instead' });
+    }
+
+    const { error: deleteError } = await supabase
+      .from('trip_members')
+      .delete()
+      .eq('id', req.membership.id);
+
+    if (deleteError) return res.status(400).json({ error: deleteError.message });
+
+    res.status(200).json({ message: 'Left trip' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

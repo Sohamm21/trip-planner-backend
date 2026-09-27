@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
+const { avatarPublicUrl } = require('../lib/avatar');
 
 const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
 const OAUTH_PROVIDERS = ['google'];
@@ -247,8 +248,16 @@ router.post('/logout', async (req, res) => {
 });
 
 // GET /api/auth/me
-router.get('/me', authenticate, (req, res) => {
-  res.json({ user: req.user });
+router.get('/me', authenticate, async (req, res) => {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', req.user.id)
+    .single();
+
+  res.json({
+    user: { ...req.user, avatar_url: avatarPublicUrl(profile?.avatar_url) },
+  });
 });
 
 module.exports = router;
