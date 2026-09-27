@@ -1,18 +1,19 @@
 const { epochFromDate } = require('../../lib/dateUtils');
+const { avatarPublicUrl } = require('../../lib/avatar');
 
 const CATEGORIES = ['food', 'transport', 'accommodation', 'activity', 'shopping', 'other'];
 
 const EXPENSE_SELECT = `
   id, name, amount, category, expense_date, created_at, updated_at, paid_by,
-  payer:profiles!expenses_paid_by_fkey(name, email),
+  payer:profiles!expenses_paid_by_fkey(name, email, avatar_url),
   expense_splits!expense_splits_expense_id_fkey(id, user_id, share_amount,
-    participant:profiles!expense_splits_user_id_fkey(name, email))
+    participant:profiles!expense_splits_user_id_fkey(name, email, avatar_url))
 `;
 
 const SETTLEMENT_SELECT = `
   id, amount, note, created_at, paid_by, paid_to,
-  payer:profiles!settlements_paid_by_fkey(name, email),
-  payee:profiles!settlements_paid_to_fkey(name, email)
+  payer:profiles!settlements_paid_by_fkey(name, email, avatar_url),
+  payee:profiles!settlements_paid_to_fkey(name, email, avatar_url)
 `;
 
 function shapeExpense(row) {
@@ -24,13 +25,19 @@ function shapeExpense(row) {
     date: epochFromDate(row.expense_date),
     createdAt: epochFromDate(row.created_at),
     updatedAt: epochFromDate(row.updated_at),
-    paidBy: { id: row.paid_by, name: row.payer?.name ?? null, email: row.payer?.email ?? null },
+    paidBy: {
+      id: row.paid_by,
+      name: row.payer?.name ?? null,
+      email: row.payer?.email ?? null,
+      avatarUrl: avatarPublicUrl(row.payer?.avatar_url),
+    },
     splits: (row.expense_splits || []).map((s) => ({
       id: s.id,
       userId: s.user_id,
       amount: Number(s.share_amount),
       name: s.participant?.name ?? null,
       email: s.participant?.email ?? null,
+      avatarUrl: avatarPublicUrl(s.participant?.avatar_url),
     })),
   };
 }
@@ -41,8 +48,18 @@ function shapeSettlement(row) {
     amount: Number(row.amount),
     note: row.note,
     createdAt: epochFromDate(row.created_at),
-    paidBy: { id: row.paid_by, name: row.payer?.name ?? null, email: row.payer?.email ?? null },
-    paidTo: { id: row.paid_to, name: row.payee?.name ?? null, email: row.payee?.email ?? null },
+    paidBy: {
+      id: row.paid_by,
+      name: row.payer?.name ?? null,
+      email: row.payer?.email ?? null,
+      avatarUrl: avatarPublicUrl(row.payer?.avatar_url),
+    },
+    paidTo: {
+      id: row.paid_to,
+      name: row.payee?.name ?? null,
+      email: row.payee?.email ?? null,
+      avatarUrl: avatarPublicUrl(row.payee?.avatar_url),
+    },
   };
 }
 

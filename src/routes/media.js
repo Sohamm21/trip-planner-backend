@@ -5,6 +5,7 @@ const authenticate = require('../middleware/authenticate');
 const { requireMembership } = require('../lib/tripAccess');
 const { epochFromDate } = require('../lib/dateUtils');
 const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
+const { avatarPublicUrl } = require('../lib/avatar');
 
 const MEDIA_MAX_FILES = 10;
 const MEDIA_MAX_PER_USER = 20; // per trip
@@ -15,7 +16,7 @@ const MEDIA_FILTER_FIELDS = { uploadedBy: 'uploaded_by' }; // public key -> real
 
 router.use(authenticate);
 
-const MEDIA_SELECT = 'id, trip_id, storage_path, caption, content_type, file_size_bytes, uploaded_by, created_at, profiles(name, email)';
+const MEDIA_SELECT = 'id, trip_id, storage_path, caption, content_type, file_size_bytes, uploaded_by, created_at, profiles(name, email, avatar_url)';
 
 // uploaded_by is a user id, but the frontend's filter UI shows members by
 // email, so `uploadedBy` filter values arrive as emails. Resolves them to
@@ -65,7 +66,12 @@ function shapeMedia(row, signedUrl) {
     contentType: row.content_type,
     fileSizeBytes: row.file_size_bytes,
     uploadedBy: row.uploaded_by
-      ? { id: row.uploaded_by, name: row.profiles?.name ?? null, email: row.profiles?.email ?? null }
+      ? {
+          id: row.uploaded_by,
+          name: row.profiles?.name ?? null,
+          email: row.profiles?.email ?? null,
+          avatarUrl: avatarPublicUrl(row.profiles?.avatar_url),
+        }
       : null, // account deleted
     createdAt: epochFromDate(row.created_at),
   };

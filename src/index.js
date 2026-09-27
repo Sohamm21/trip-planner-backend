@@ -23,6 +23,7 @@ app.use('/api/trips', require('./routes/places'));
 app.use('/api/trips', require('./routes/notes'));
 app.use('/api/invites', require('./routes/invites'));
 app.use('/api/destinations', require('./routes/destinations'));
+app.use('/api/profile', require('./routes/profile'));
 
 
 app.listen(PORT, () => {

@@ -1,9 +1,10 @@
 const { epochFromDate } = require('../../lib/dateUtils');
+const { avatarPublicUrl } = require('../../lib/avatar');
 
 const PLACE_SELECT = `
   id, trip_id, name, category, location_url, lat, lng, photo_url, photo_attribution, notes,
   created_by, created_at, updated_at,
-  creator:profiles(name)
+  creator:profiles(name, avatar_url)
 `;
 
 function shapePlace(row) {
@@ -20,7 +21,11 @@ function shapePlace(row) {
       photoUrl: row.photo_url,
       photoAttribution: row.photo_attribution,
     },
-    createdBy: { id: row.created_by, name: row.creator?.name ?? null },
+    createdBy: {
+      id: row.created_by,
+      name: row.creator?.name ?? null,
+      avatarUrl: avatarPublicUrl(row.creator?.avatar_url),
+    },
     createdAt: epochFromDate(row.created_at),
     updatedAt: epochFromDate(row.updated_at),
   };

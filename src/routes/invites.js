@@ -4,6 +4,7 @@ const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
 const { epochFromDate } = require('../lib/dateUtils');
 const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
+const { avatarPublicUrl } = require('../lib/avatar');
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -29,7 +30,13 @@ function shapeInvite(invite) {
           end_date: epochFromDate(invite.trips.end_date),
         }
       : null,
-    invitedBy: invite.inviter ? { name: invite.inviter.name, email: invite.inviter.email } : null,
+    invitedBy: invite.inviter
+      ? {
+          name: invite.inviter.name,
+          email: invite.inviter.email,
+          avatarUrl: avatarPublicUrl(invite.inviter.avatar_url),
+        }
+      : null,
   };
 }
 
@@ -49,7 +56,7 @@ router.get('/', async (req, res) => {
       .select(`
         id, role, created_at,
         trips ( id, name, destination, start_date, end_date ),
-        inviter:profiles!trip_invites_invited_by_fkey ( name, email )
+        inviter:profiles!trip_invites_invited_by_fkey ( name, email, avatar_url )
       `, { count: 'exact' })
       .eq('invited_user_id', req.user.id)
       .eq('status', 'pending');

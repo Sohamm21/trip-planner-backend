@@ -12,12 +12,19 @@ const MONTHLY_DESTINATIONS = Object.fromEntries(
     month,
     destinations.map((destination, index) => ({
       id: `${month}-${index}`,
+      month: Number(month),
       ...destination,
       image: DESTINATION_IMAGES[destination.name] || PLACEHOLDER_IMAGE,
       mapUrl: mapsUrl(destination.name, destination.state),
     })),
   ]),
 );
+
+const ALL_DESTINATIONS = Object.values(MONTHLY_DESTINATIONS).flat();
+
+router.get('/all', (req, res) => {
+  res.json({ destinations: ALL_DESTINATIONS });
+});
 
 // GET /api/destinations?month=1-12 — editorial "best places to visit" content
 // for the trips dashboard's empty state. month defaults to the current month.

@@ -6,6 +6,7 @@ const { requireMembership } = require('../lib/tripAccess');
 const { epochFromDate } = require('../lib/dateUtils');
 const { sendInviteEmail } = require('../lib/email');
 const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
+const { avatarPublicUrl } = require('../lib/avatar');
 
 // Both members and pendingInvites are filterable by role; no pagination here since this
 // endpoint returns two lists in one response rather than a single paginated collection —
@@ -22,6 +23,7 @@ function shapeMember(member) {
     role: member.role,
     name: member.profiles?.name ?? null,
     email: member.profiles?.email ?? null,
+    avatarUrl: avatarPublicUrl(member.profiles?.avatar_url),
   };
 }
 
@@ -31,7 +33,13 @@ function shapeInvite(invite) {
     email: invite.invited_email,
     role: invite.role,
     createdAt: epochFromDate(invite.created_at),
-    invitedBy: invite.inviter ? { name: invite.inviter.name, email: invite.inviter.email } : null,
+    invitedBy: invite.inviter
+      ? {
+          name: invite.inviter.name,
+          email: invite.inviter.email,
+          avatarUrl: avatarPublicUrl(invite.inviter.avatar_url),
+        }
+      : null,
   };
 }
 
@@ -46,12 +54,12 @@ router.get('/:id/collaborators', requireMembership(), async (req, res) => {
   try {
     let membersQuery = supabase
       .from('trip_members')
-      .select('id, user_id, role, profiles!trip_members_user_id_profiles_fkey(name, email)')
+      .select('id, user_id, role, profiles!trip_members_user_id_profiles_fkey(name, email, avatar_url)')
       .eq('trip_id', id);
 
     let invitesQuery = supabase
       .from('trip_invites')
-      .select('id, invited_email, role, created_at, inviter:profiles!trip_invites_invited_by_fkey(name, email)')
+      .select('id, invited_email, role, created_at, inviter:profiles!trip_invites_invited_by_fkey(name, email, avatar_url)')
       .eq('trip_id', id)
       .eq('status', 'pending');
 
@@ -193,7 +201,7 @@ router.patch('/:id/collaborators/:memberId', requireMembership(['admin']), async
       .from('trip_members')
       .update({ role })
       .eq('id', memberId)
-      .select('id, user_id, role, profiles!trip_members_user_id_profiles_fkey(name, email)')
+      .select('id, user_id, role, profiles!trip_members_user_id_profiles_fkey(name, email, avatar_url)')
       .single();
 
     if (error) return res.status(400).json({ error: error.message });

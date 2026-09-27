@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../../lib/supabase');
 const { requireMembership } = require('../../lib/tripAccess');
+const { avatarPublicUrl } = require('../../lib/avatar');
 
 // GET /api/trips/:id/expenses/balances — declared before expenseRoutes' /:expenseId
 // routes (see index.js mount order) so it can never be shadowed by a future
@@ -14,7 +15,7 @@ router.get('/:id/expenses/balances', requireMembership(), async (req, res) => {
 
     const { data: members, error: membersError } = await supabase
       .from('trip_members')
-      .select('user_id, profiles!trip_members_user_id_profiles_fkey(name, email)')
+      .select('user_id, profiles!trip_members_user_id_profiles_fkey(name, email, avatar_url)')
       .eq('trip_id', id);
 
     if (membersError) return res.status(400).json({ error: membersError.message });
@@ -59,6 +60,7 @@ router.get('/:id/expenses/balances', requireMembership(), async (req, res) => {
       userId,
       name: profileById[userId]?.name ?? null,
       email: profileById[userId]?.email ?? null,
+      avatarUrl: avatarPublicUrl(profileById[userId]?.avatar_url),
       balance: Math.round(cents) / 100,
     }));
 
@@ -81,8 +83,10 @@ router.get('/:id/expenses/balances', requireMembership(), async (req, res) => {
         suggestedSettlements.push({
           fromUserId: debtor.userId,
           fromName: debtor.name,
+          fromAvatarUrl: debtor.avatarUrl,
           toUserId: creditor.userId,
           toName: creditor.name,
+          toAvatarUrl: creditor.avatarUrl,
           amount,
         });
       }
