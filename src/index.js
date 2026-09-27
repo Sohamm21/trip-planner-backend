@@ -7,8 +7,14 @@ const cookieParser = require('cookie-parser');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// FRONTEND_URL is a comma-separated list so local dev (localhost:3000) and
+// production (www.bhatakgo.com) can both be allowed without code changes.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim());
+
 app.use(morgan('dev'));
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
