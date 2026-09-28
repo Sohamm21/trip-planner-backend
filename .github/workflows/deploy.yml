@@ -56,6 +56,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
           SUPABASE_ANON_KEY: "${{ secrets.SUPABASE_ANON_KEY }}"
           RESEND_API_KEY: "${{ secrets.RESEND_API_KEY }}"
+          RESEND_FROM_EMAIL: "${{ secrets.RESEND_FROM_EMAIL }}"
           OAUTH_REDIRECT_URL: "${{ secrets.OAUTH_REDIRECT_URL }}"
           FRONTEND_URL: "${{ secrets.FRONTEND_URL }}"
           EOF
