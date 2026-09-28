@@ -1,0 +1,72 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  PROJECT_ID: bhatak-go
+  REGION: asia-south1
+  SERVICE: trip-planner-backend
+  REPOSITORY: cloud-run-source-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Read app version
+        id: version
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          # Cloud Run revision tags allow only lowercase letters, digits, and hyphens - no dots.
+          echo "revision_tag=${VERSION//./-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: |
+          IMAGE=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}
+          docker build -t $IMAGE:${{ steps.version.outputs.value }} -t $IMAGE:${{ github.sha }} .
+
+      - name: Push image
+        run: |
+          IMAGE=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}
+          docker push $IMAGE:${{ steps.version.outputs.value }}
+          docker push $IMAGE:${{ github.sha }}
+
+      - name: Write env vars file
+        run: |
+          cat > env-vars.yaml <<EOF
+          SUPABASE_URL: "${{ secrets.SUPABASE_URL }}"
+          SUPABASE_SERVICE_ROLE_KEY: "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+          SUPABASE_ANON_KEY: "${{ secrets.SUPABASE_ANON_KEY }}"
+          RESEND_API_KEY: "${{ secrets.RESEND_API_KEY }}"
+          OAUTH_REDIRECT_URL: "${{ secrets.OAUTH_REDIRECT_URL }}"
+          FRONTEND_URL: "${{ secrets.FRONTEND_URL }}"
+          EOF
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ steps.version.outputs.value }} \
+            --region=${{ env.REGION }} \
+            --allow-unauthenticated \
+            --env-vars-file=env-vars.yaml \
+            --tag=${{ steps.version.outputs.revision_tag }}
