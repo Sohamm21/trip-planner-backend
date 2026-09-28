@@ -15,7 +15,7 @@ async function sendEmail({ to, subject, html, text }) {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL || 'Voyage <onboarding@resend.dev>',
+        from: process.env.RESEND_FROM_EMAIL || 'BhatakGo <onboarding@resend.dev>',
         to: [to],
         subject,
         html,
@@ -45,8 +45,8 @@ function escapeHtml(value) {
 }
 
 function sendInviteEmail({ to, tripName, inviterName, role }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  const subject = `${inviterName} invited you to "${tripName}" on Voyage`;
+  const frontendUrl = process.env.FRONTEND_URL;
+  const subject = `${inviterName} invited you to "${tripName}" on BhatakGo`;
 
   const html = renderTemplate('inviteEmail.html', {
     tripName: escapeHtml(tripName),
