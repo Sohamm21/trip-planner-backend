@@ -5,6 +5,7 @@ const { requireMembership } = require('../../lib/tripAccess');
 const { SETTLEMENT_SELECT, shapeSettlement } = require('./shape');
 const { allAreMembers } = require('./splitLogic');
 const { parseJsonQuery, applyFilters } = require('../../lib/queryFilters');
+const { sendSettlementEmail } = require('../../lib/email');
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -75,6 +76,39 @@ router.post('/:id/expenses/settlements', requireMembership(), async (req, res) =
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
+
+    const { data: trip } = await supabase.from('trips').select('name, currency').eq('id', id).single();
+    const payerName = req.user.user_metadata?.name || req.user.email;
+
+    const { error: notifyError } = await supabase.from('notifications').insert({
+      user_id: paidTo,
+      type: 'settlement_recorded',
+      reference_type: 'settlement',
+      reference_id: data.id,
+      data: {
+        tripId: id,
+        tripName: trip?.name || 'a trip',
+        amount: Number(amount),
+        currency: trip?.currency,
+        payerName,
+        note: note || null,
+      },
+    });
+
+    if (notifyError) console.warn(`[notifications] failed to create settlement_recorded notification: ${notifyError.message}`);
+
+    if (data.payee?.email) {
+      const { ok, error: emailError } = await sendSettlementEmail({
+        to: data.payee.email,
+        tripName: trip?.name || 'a trip',
+        payerName,
+        amount: Number(amount),
+        currency: trip?.currency,
+        note,
+      });
+
+      if (!ok) console.warn(`[settlement email] failed to send to ${data.payee.email}: ${emailError}`);
+    }
 
     res.status(201).json({ settlement: shapeSettlement(data) });
   } catch (err) {

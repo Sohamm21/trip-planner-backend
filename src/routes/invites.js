@@ -2,88 +2,27 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
-const { epochFromDate } = require('../lib/dateUtils');
-const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
-const { avatarPublicUrl } = require('../lib/avatar');
-
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-const INVITE_FILTER_FIELDS = { role: 'role' };
 
 // Note: unlike collaborators.js, these routes are gated by IDENTITY (does this invite
 // belong to req.user), not trip membership — the invitee isn't a trip member yet by
 // definition, so requireMembership() would always reject them. Kept in a separate file
 // from collaborators.js so the two authorization models don't get cross-wired later.
+//
+// Listing invites now happens via GET /api/notifications (type: 'trip_invite') instead
+// of a route here — this file only holds the accept/decline actions themselves, since
+// "create a trip_members row" is real business logic that belongs with the rest of the
+// invite lifecycle, not in the generic notifications surface.
 router.use(authenticate);
 
-function shapeInvite(invite) {
-  return {
-    id: invite.id,
-    role: invite.role,
-    createdAt: epochFromDate(invite.created_at),
-    trip: invite.trips
-      ? {
-          id: invite.trips.id,
-          name: invite.trips.name,
-          destination: invite.trips.destination,
-          start_date: epochFromDate(invite.trips.start_date),
-          end_date: epochFromDate(invite.trips.end_date),
-        }
-      : null,
-    invitedBy: invite.inviter
-      ? {
-          name: invite.inviter.name,
-          email: invite.inviter.email,
-          avatarUrl: avatarPublicUrl(invite.inviter.avatar_url),
-        }
-      : null,
-  };
+async function markInviteNotificationRead(inviteId) {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true })
+    .eq('reference_type', 'trip_invite')
+    .eq('reference_id', inviteId);
+
+  if (error) console.warn(`[notifications] failed to mark trip_invite notification read: ${error.message}`);
 }
-
-// GET /api/invites — pending invites addressed to the logged-in user. No "/mine" suffix
-// needed: every route on this router is already identity-scoped to req.user. Paginated +
-// filterable via ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"role","operator":"eq","value":"editor"}]}.
-router.get('/', async (req, res) => {
-  const { jsonQuery, error: queryError } = parseJsonQuery(req);
-  if (queryError) return res.status(400).json({ error: queryError });
-
-  const page = Math.max(parseInt(jsonQuery.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(jsonQuery.limit, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
-
-  try {
-    let query = supabase
-      .from('trip_invites')
-      .select(`
-        id, role, created_at,
-        trips ( id, name, destination, start_date, end_date ),
-        inviter:profiles!trip_invites_invited_by_fkey ( name, email, avatar_url )
-      `, { count: 'exact' })
-      .eq('invited_user_id', req.user.id)
-      .eq('status', 'pending');
-
-    try {
-      query = applyFilters(query, jsonQuery.filters, INVITE_FILTER_FIELDS);
-    } catch (err) {
-      return res.status(err.status || 400).json({ error: err.message });
-    }
-
-    const from = (page - 1) * limit;
-    const { data: invites, error, count } = await query.range(from, from + limit - 1);
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    const total = count ?? 0;
-    res.json({
-      invites: invites.map(shapeInvite),
-      page,
-      limit,
-      total,
-      totalPages: Math.max(Math.ceil(total / limit), 1),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // POST /api/invites/:inviteId/accept
 router.post('/:inviteId/accept', async (req, res) => {
@@ -92,7 +31,7 @@ router.post('/:inviteId/accept', async (req, res) => {
   try {
     const { data: invite, error } = await supabase
       .from('trip_invites')
-      .select('id, trip_id, invited_user_id, role, status')
+      .select('id, trip_id, invited_user_id, role, status, expires_at')
       .eq('id', inviteId)
       .single();
 
@@ -104,6 +43,12 @@ router.post('/:inviteId/accept', async (req, res) => {
 
     if (invite.status !== 'pending') {
       return res.status(409).json({ error: 'This invite has already been responded to' });
+    }
+
+    if (new Date(invite.expires_at) < new Date()) {
+      await supabase.from('trip_invites').update({ status: 'expired' }).eq('id', inviteId);
+      await markInviteNotificationRead(inviteId);
+      return res.status(410).json({ error: 'This invite has expired' });
     }
 
     const { error: memberError } = await supabase
@@ -123,6 +68,8 @@ router.post('/:inviteId/accept', async (req, res) => {
 
     if (updateError) return res.status(400).json({ error: updateError.message });
 
+    await markInviteNotificationRead(inviteId);
+
     res.json({ message: 'Invite accepted', tripId: invite.trip_id, role: invite.role });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -136,7 +83,7 @@ router.post('/:inviteId/decline', async (req, res) => {
   try {
     const { data: invite, error } = await supabase
       .from('trip_invites')
-      .select('id, invited_user_id, status')
+      .select('id, invited_user_id, status, expires_at')
       .eq('id', inviteId)
       .single();
 
@@ -150,12 +97,20 @@ router.post('/:inviteId/decline', async (req, res) => {
       return res.status(409).json({ error: 'This invite has already been responded to' });
     }
 
+    if (new Date(invite.expires_at) < new Date()) {
+      await supabase.from('trip_invites').update({ status: 'expired' }).eq('id', inviteId);
+      await markInviteNotificationRead(inviteId);
+      return res.status(410).json({ error: 'This invite has expired' });
+    }
+
     const { error: updateError } = await supabase
       .from('trip_invites')
       .update({ status: 'declined', responded_at: new Date().toISOString() })
       .eq('id', inviteId);
 
     if (updateError) return res.status(400).json({ error: updateError.message });
+
+    await markInviteNotificationRead(inviteId);
 
     res.json({ message: 'Invite declined' });
   } catch (err) {

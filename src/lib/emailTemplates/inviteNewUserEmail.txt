@@ -1,0 +1,1 @@
+{{inviterName}} invited you to "{{tripName}}" on BhatakGo as a {{role}}. You'll need a free account first — sign up with this email address ({{inviteeEmail}}) at {{registerUrl}} and the invite will be waiting for you to accept. This invite expires in 24 hours, so sign up soon.

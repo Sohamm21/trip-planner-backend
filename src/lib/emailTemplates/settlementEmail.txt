@@ -1,0 +1,1 @@
+{{payerName}} recorded a payment of {{amount}} to you on the trip "{{tripName}}".{{noteSuffix}} View it at {{frontendUrl}}.

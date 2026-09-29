@@ -6,6 +6,7 @@ const { dateStringFromEpoch } = require('../../lib/dateUtils');
 const { CATEGORIES, EXPENSE_SELECT, shapeExpense } = require('./shape');
 const { computeSplits } = require('./splitLogic');
 const { parseJsonQuery, applyFilters } = require('../../lib/queryFilters');
+const { sendExpenseTaggedEmail } = require('../../lib/email');
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -93,6 +94,51 @@ router.post('/:id/expenses', requireMembership(['admin', 'editor']), async (req,
     if (splitsError) {
       await supabase.from('expenses').delete().eq('id', expense.id);
       return res.status(400).json({ error: splitsError.message });
+    }
+
+    // Notify everyone tagged in the split except the payer themselves — best-effort,
+    // shouldn't fail expense creation if it errors.
+    const taggedUserIds = splits.map((s) => s.userId).filter((userId) => userId !== req.user.id);
+
+    if (taggedUserIds.length > 0) {
+      const payerName = req.user.user_metadata?.name || req.user.email;
+
+      const [{ data: taggedProfiles }, { data: trip }] = await Promise.all([
+        supabase.from('profiles').select('email').in('id', taggedUserIds),
+        supabase.from('trips').select('name, currency').eq('id', id).single(),
+      ]);
+
+      const { error: notifyError } = await supabase.from('notifications').insert(
+        taggedUserIds.map((userId) => ({
+          user_id: userId,
+          type: 'expense_tagged',
+          reference_type: 'expense',
+          reference_id: expense.id,
+          data: {
+            tripId: id,
+            expenseId: expense.id,
+            expenseName: name,
+            amount: Number(amount),
+            currency: trip?.currency,
+            paidByName: payerName,
+          },
+        }))
+      );
+
+      if (notifyError) console.warn(`[notifications] failed to create expense_tagged notifications: ${notifyError.message}`);
+
+      for (const { email: taggedEmail } of taggedProfiles || []) {
+        const { ok, error: emailError } = await sendExpenseTaggedEmail({
+          to: taggedEmail,
+          tripName: trip?.name || 'a trip',
+          expenseName: name,
+          payerName,
+          amount: Number(amount),
+          currency: trip?.currency,
+        });
+
+        if (!ok) console.warn(`[expense email] failed to send to ${taggedEmail}: ${emailError}`);
+      }
     }
 
     const { data: full, error: refetchError } = await supabase

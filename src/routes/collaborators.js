@@ -33,6 +33,7 @@ function shapeInvite(invite) {
     email: invite.invited_email,
     role: invite.role,
     createdAt: epochFromDate(invite.created_at),
+    expiresAt: epochFromDate(invite.expires_at),
     invitedBy: invite.inviter
       ? {
           name: invite.inviter.name,
@@ -59,9 +60,10 @@ router.get('/:id/collaborators', requireMembership(), async (req, res) => {
 
     let invitesQuery = supabase
       .from('trip_invites')
-      .select('id, invited_email, role, created_at, inviter:profiles!trip_invites_invited_by_fkey(name, email, avatar_url)')
+      .select('id, invited_email, role, created_at, expires_at, inviter:profiles!trip_invites_invited_by_fkey(name, email, avatar_url)')
       .eq('trip_id', id)
-      .eq('status', 'pending');
+      .eq('status', 'pending')
+      .gt('expires_at', new Date().toISOString());
 
     try {
       membersQuery = applyFilters(membersQuery, jsonQuery.filters, MEMBER_FILTER_FIELDS);
@@ -101,37 +103,38 @@ router.post('/:id/collaborators/invite', requireMembership(['admin']), async (re
   const normalizedEmail = String(email).trim().toLowerCase();
 
   try {
+    // profile may not exist yet — inviting someone with no account is allowed.
+    // handle_new_user() links invited_user_id automatically once they sign up.
     const { data: profile } = await supabase
       .from('profiles')
       .select('id, email, name')
       .eq('email', normalizedEmail)
       .single();
 
-    if (!profile) {
-      return res.status(404).json({ error: 'No account found with this email' });
-    }
+    if (profile) {
+      const { data: existingMember } = await supabase
+        .from('trip_members')
+        .select('id')
+        .eq('trip_id', id)
+        .eq('user_id', profile.id)
+        .single();
 
-    const { data: existingMember } = await supabase
-      .from('trip_members')
-      .select('id')
-      .eq('trip_id', id)
-      .eq('user_id', profile.id)
-      .single();
-
-    if (existingMember) {
-      return res.status(409).json({ error: 'This user is already a collaborator on this trip' });
+      if (existingMember) {
+        return res.status(409).json({ error: 'This user is already a collaborator on this trip' });
+      }
     }
 
     const { data: existingInvite } = await supabase
       .from('trip_invites')
       .select('id')
       .eq('trip_id', id)
-      .eq('invited_user_id', profile.id)
+      .eq('invited_email', normalizedEmail)
       .eq('status', 'pending')
+      .gt('expires_at', new Date().toISOString())
       .single();
 
     if (existingInvite) {
-      return res.status(409).json({ error: 'This user already has a pending invite to this trip' });
+      return res.status(409).json({ error: 'This email already has a pending invite to this trip' });
     }
 
     const { data: invite, error } = await supabase
@@ -139,7 +142,7 @@ router.post('/:id/collaborators/invite', requireMembership(['admin']), async (re
       .insert({
         trip_id: id,
         invited_email: normalizedEmail,
-        invited_user_id: profile.id,
+        invited_user_id: profile?.id ?? null,
         role,
         invited_by: req.user.id,
       })
@@ -151,11 +154,34 @@ router.post('/:id/collaborators/invite', requireMembership(['admin']), async (re
     const { data: trip } = await supabase.from('trips').select('name').eq('id', id).single();
     const inviterName = req.user.user_metadata?.name || req.user.email;
 
+    // Only create the notification if they already have an account — otherwise
+    // there's no user_id to attach it to yet; handle_new_user() creates it for
+    // them once they sign up (see the trigger for the equivalent insert).
+    if (profile) {
+      const { error: notifyError } = await supabase.from('notifications').insert({
+        user_id: profile.id,
+        type: 'trip_invite',
+        reference_type: 'trip_invite',
+        reference_id: invite.id,
+        data: {
+          inviteId: invite.id,
+          tripId: id,
+          tripName: trip?.name || 'a trip',
+          role,
+          inviterId: req.user.id,
+          inviterName,
+        },
+      });
+
+      if (notifyError) console.warn(`[notifications] failed to create trip_invite notification: ${notifyError.message}`);
+    }
+
     const { ok, error: emailError } = await sendInviteEmail({
       to: normalizedEmail,
       tripName: trip?.name || 'a trip',
       inviterName,
       role,
+      hasAccount: Boolean(profile),
     });
 
     if (!ok) console.warn(`[invite email] failed to send to ${normalizedEmail}: ${emailError}`);

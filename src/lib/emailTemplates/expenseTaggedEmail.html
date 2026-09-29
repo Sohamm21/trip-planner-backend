@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BhatakGo Invite</title>
+  <title>BhatakGo Expense</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f5f5;padding:40px 20px;">
@@ -22,25 +22,17 @@
           <tr>
             <td style="padding:40px 32px;">
               <h2 style="margin:0 0 20px;color:#111827;font-size:24px;">
-                You're invited! ✈️
+                You've been added to an expense 🧾
               </h2>
 
-              <p style="margin:0 0 16px;color:#4b5563;font-size:16px;line-height:1.6;">
-                <strong>{{inviterName}}</strong> has invited you to collaborate on the trip
-                <strong>"{{tripName}}"</strong> as a <strong>{{role}}</strong>.
-              </p>
-
-              <p style="margin:0 0 8px;color:#4b5563;font-size:16px;line-height:1.6;">
-                Log in to BhatakGo to accept or decline this invite.
-              </p>
-
-              <p style="margin:0 0 30px;color:#9ca3af;font-size:14px;line-height:1.5;">
-                This invite expires in 24 hours.
+              <p style="margin:0 0 30px;color:#4b5563;font-size:16px;line-height:1.6;">
+                <strong>{{payerName}}</strong> added <strong>"{{expenseName}}"</strong> ({{amount}}) on the trip
+                <strong>"{{tripName}}"</strong> and included you in the split.
               </p>
 
               <div style="text-align:center;margin-bottom:10px;">
                 <a href="{{frontendUrl}}" style="display:inline-block;background:#f0552e;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:bold;">
-                  Open BhatakGo
+                  View in BhatakGo
                 </a>
               </div>
             </td>
