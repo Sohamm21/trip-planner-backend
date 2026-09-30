@@ -12,7 +12,7 @@ const COVER_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour, matches trips.js
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!ALLOWED_AVATAR_TYPES.includes(file.mimetype)) {
       return cb(new Error('avatar must be a jpg, jpeg, png, webp or gif image'));

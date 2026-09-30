@@ -151,8 +151,12 @@ router.post('/:id/collaborators/invite', requireMembership(['admin']), async (re
 
     if (error) return res.status(400).json({ error: error.message });
 
-    const { data: trip } = await supabase.from('trips').select('name').eq('id', id).single();
+    const [{ data: trip }, { data: inviterProfile }] = await Promise.all([
+      supabase.from('trips').select('name').eq('id', id).single(),
+      supabase.from('profiles').select('avatar_url').eq('id', req.user.id).single(),
+    ]);
     const inviterName = req.user.user_metadata?.name || req.user.email;
+    const inviterAvatarUrl = avatarPublicUrl(inviterProfile?.avatar_url);
 
     // Only create the notification if they already have an account — otherwise
     // there's no user_id to attach it to yet; handle_new_user() creates it for
@@ -170,6 +174,7 @@ router.post('/:id/collaborators/invite', requireMembership(['admin']), async (re
           role,
           inviterId: req.user.id,
           inviterName,
+          inviterAvatarUrl,
         },
       });
 

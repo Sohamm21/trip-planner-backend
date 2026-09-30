@@ -7,7 +7,7 @@ const { epochFromDate } = require('../lib/dateUtils');
 const { parseJsonQuery, applyFilters } = require('../lib/queryFilters');
 const { avatarPublicUrl } = require('../lib/avatar');
 
-const MEDIA_MAX_FILES = 10;
+const MEDIA_MAX_FILES = 20; // per upload batch, matches MEDIA_MAX_PER_USER
 const MEDIA_MAX_PER_USER = 20; // per trip
 const MEDIA_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour, matches trip-covers
 const DEFAULT_PAGE_SIZE = 20;
