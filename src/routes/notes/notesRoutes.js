@@ -4,6 +4,7 @@ const supabase = require('../../lib/supabase');
 const { requireMembership } = require('../../lib/tripAccess');
 const { createNoteSchema, updateNoteSchema, validateBody } = require('./validation');
 const { NOTE_SELECT, shapeNote } = require('./shape');
+const { sanitizeNoteContent } = require('../../lib/sanitizeHtml');
 
 // GET /api/trips/:id/notes — any member. Pinned first, then most recently updated.
 router.get('/:id/notes', requireMembership(), async (req, res) => {
@@ -38,7 +39,7 @@ router.post('/:id/notes', requireMembership(['admin', 'editor']), async (req, re
       .from('notes')
       .insert({
         trip_id: id,
-        content: body.content,
+        content: sanitizeNoteContent(body.content),
         is_pinned: body.is_pinned ?? false,
         created_by: req.user.id,
       })
@@ -78,7 +79,7 @@ router.patch('/:id/notes/:noteId', requireMembership(['admin', 'editor']), async
     }
 
     const updates = { updated_at: new Date().toISOString() };
-    if (body.content !== undefined) updates.content = body.content;
+    if (body.content !== undefined) updates.content = sanitizeNoteContent(body.content);
     if (body.is_pinned !== undefined) updates.is_pinned = body.is_pinned;
 
     const { data, error } = await supabase

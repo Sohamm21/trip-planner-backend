@@ -14,7 +14,6 @@ const TRIP_FILTER_FIELDS = { status: 'status', tripStatus: 'tripStatus' };
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-const COVER_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour
 const DEFAULT_COVER_IMAGE = 'https://res.cloudinary.com/dyrv985gb/image/upload/v1790399857/BhatakGo/mountains_night.jpg';
 
 router.use(authenticate);
@@ -30,19 +29,17 @@ function formattedTripPayload(trip) {
   };
 }
 
-// cover_image is stored as a private storage path — replace it with a short-lived signed URL.
-// The default cover (no upload at creation) is a plain external URL, not a storage path — pass it through as-is.
-async function withSignedCoverImage(trip) {
+// cover_image is stored as a storage path in the (public) trip-covers bucket — replace it
+// with its public URL. The default cover (no upload at creation) is already a plain
+// external URL, not a storage path — pass it through as-is. Public URLs are constructed
+// locally (no network call, never expire), so unlike signed URLs there's nothing to batch.
+function withPublicCoverImage(trip) {
   if (!trip.cover_image) return trip;
   if (/^https?:\/\//i.test(trip.cover_image)) return trip;
 
-  const { data, error } = await supabase.storage
-    .from('trip-covers')
-    .createSignedUrl(trip.cover_image, COVER_URL_EXPIRY_SECONDS);
+  const { data } = supabase.storage.from('trip-covers').getPublicUrl(trip.cover_image);
 
-  if (error) return { ...trip, cover_image: null };
-
-  return { ...trip, cover_image: data.signedUrl };
+  return { ...trip, cover_image: data.publicUrl };
 }
 
 // GET /api/trips — all trips where the logged-in user is a member. Paginated + filterable
@@ -73,20 +70,19 @@ router.get('/getTrips', async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const trips = await Promise.all(
-      data.map(async (row) => {
-        const start = new Date(row.trips.start_date);
-        const end = new Date(row.trips.end_date);
+    const tripsWithStatus = data.map((row) => {
+      const start = new Date(row.trips.start_date);
+      const end = new Date(row.trips.end_date);
 
-        let tripStatus;
-        if (end < today) tripStatus = 'COMPLETED';
-        else if (start > today) tripStatus = 'UPCOMING';
-        else tripStatus = 'ONGOING';
+      let tripStatus;
+      if (end < today) tripStatus = 'COMPLETED';
+      else if (start > today) tripStatus = 'UPCOMING';
+      else tripStatus = 'ONGOING';
 
-        const trip = await withSignedCoverImage(formattedTripPayload(row.trips));
-        return { ...trip, my_role: row.role, tripStatus };
-      })
-    );
+      return { ...formattedTripPayload(row.trips), my_role: row.role, tripStatus };
+    });
+
+    const trips = tripsWithStatus.map(withPublicCoverImage);
 
     // Ongoing/upcoming sort soonest-starting first; completed sorts most-recently-finished
     // first. Different statuses aren't compared against each other — the frontend splits
@@ -190,7 +186,7 @@ router.post('/createTrip', upload.single('image'), async (req, res) => {
       finalTrip = updatedTrip;
     }
 
-    res.status(201).json({ trip: await withSignedCoverImage(formattedTripPayload(finalTrip)) });
+    res.status(201).json({ trip: withPublicCoverImage(formattedTripPayload(finalTrip)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -221,7 +217,7 @@ router.get('/:id/details', requireMembership(), async (req, res) => {
     else if (start > today) tripStatus = 'UPCOMING';
     else tripStatus = 'ONGOING';
 
-    const shaped = await withSignedCoverImage(formattedTripPayload(trip));
+    const shaped = withPublicCoverImage(formattedTripPayload(trip));
 
     res.json({ trip: { ...shaped, my_role: req.membership.role, tripStatus } });
   } catch (err) {
@@ -260,7 +256,7 @@ router.patch('/:id/update', requireMembership(['admin']), upload.single('image')
 
     if (error) return res.status(400).json({ error: error.message });
 
-    res.json({ trip: await withSignedCoverImage(formattedTripPayload(trip)) });
+    res.json({ trip: withPublicCoverImage(formattedTripPayload(trip)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

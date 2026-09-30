@@ -180,6 +180,12 @@ router.patch(
           });
       }
 
+      if (amount !== undefined && Number(amount) <= 0) {
+        return res
+          .status(400)
+          .json({ error: "amount must be a positive number" });
+      }
+
       if (category && !CATEGORIES.includes(category)) {
         return res
           .status(400)

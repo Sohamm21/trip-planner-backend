@@ -8,7 +8,6 @@ const { epochFromDate } = require('../lib/dateUtils');
 const { ALLOWED_AVATAR_TYPES, avatarPublicUrl } = require('../lib/avatar');
 
 const RECENT_TRIPS_LIMIT = 4;
-const COVER_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour, matches trips.js
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -34,19 +33,17 @@ function tripStatusOf(trip) {
   return 'ONGOING';
 }
 
-// cover_image is stored as a private storage path — replace it with a short-lived signed URL.
-// The default cover (no upload at creation) is a plain external URL, not a storage path — pass it through as-is.
-async function withSignedCoverImage(trip) {
+// cover_image is stored as a storage path in the (public) trip-covers bucket — replace it
+// with its public URL. The default cover (no upload at creation) is already a plain
+// external URL, not a storage path — pass it through as-is. Public URLs are constructed
+// locally (no network call, never expire), so unlike signed URLs there's nothing to batch.
+function withPublicCoverImage(trip) {
   if (!trip.cover_image) return trip;
   if (/^https?:\/\//i.test(trip.cover_image)) return trip;
 
-  const { data, error } = await supabase.storage
-    .from('trip-covers')
-    .createSignedUrl(trip.cover_image, COVER_URL_EXPIRY_SECONDS);
+  const { data } = supabase.storage.from('trip-covers').getPublicUrl(trip.cover_image);
 
-  if (error) return { ...trip, cover_image: null };
-
-  return { ...trip, cover_image: data.signedUrl };
+  return { ...trip, cover_image: data.publicUrl };
 }
 
 // GET /api/profile — profile summary: avatar, stats, and the 4 most recent trips.
@@ -118,19 +115,16 @@ router.get('/', async (req, res) => {
       }, {});
     }
 
-    const shapedRecentTrips = await Promise.all(
-      recentTrips.map(async (trip) => {
-        const { tripStatus, ...rest } = trip;
-        return {
-          ...rest,
-          start_date: epochFromDate(trip.start_date),
-          end_date: epochFromDate(trip.end_date),
-          cover_image: (await withSignedCoverImage(trip)).cover_image,
-          tripStatus,
-          members: membersByTripId[trip.id] || [],
-        };
-      })
-    );
+    const shapedRecentTrips = recentTrips.map(withPublicCoverImage).map((trip) => {
+      const { tripStatus, ...rest } = trip;
+      return {
+        ...rest,
+        start_date: epochFromDate(trip.start_date),
+        end_date: epochFromDate(trip.end_date),
+        tripStatus,
+        members: membersByTripId[trip.id] || [],
+      };
+    });
 
     res.json({
       user: {
