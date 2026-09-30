@@ -10,6 +10,9 @@ async function authenticate(req, res, next) {
   const { data: { user }, error } = await supabase.auth.getUser(token);
 
   if (error || !user) {
+    // The cookie's own maxAge outlives Supabase's token expiry, so without this the
+    // browser keeps resending a dead cookie on every request until maxAge runs out.
+    res.clearCookie('access_token');
     return res.status(401).json({ error: 'Invalid or expired token', code: 'UNAUTHORIZED' });
   }
 
