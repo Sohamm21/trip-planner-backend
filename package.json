@@ -1,6 +1,6 @@
 {
   "name": "trip-planner-sever",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -22,6 +22,7 @@
     "date-fns": "^4.4.0",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
     "joi": "^18.2.9",
     "morgan": "^1.11.0",
     "multer": "^2.2.0",

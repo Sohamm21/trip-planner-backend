@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../lib/supabase');
 const authenticate = require('../middleware/authenticate');
+const { createAuthRateLimiter } = require('../middleware/rateLimiter');
 const { avatarPublicUrl } = require('../lib/avatar');
 
 const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
@@ -17,7 +18,7 @@ function setAuthCookie(res, token) {
 }
 
 // POST /api/auth/register — step 1: sends OTP to email
-router.post('/register', async (req, res) => {
+router.post('/register', createAuthRateLimiter(), async (req, res) => {
   const { email, name, password } = req.body;
 
   if (!email || !name || !password) {
@@ -36,7 +37,7 @@ router.post('/register', async (req, res) => {
 });
 
 // POST /api/auth/verify-registration — step 2: verifies OTP and creates account
-router.post('/verify-registration', async (req, res) => {
+router.post('/verify-registration', createAuthRateLimiter(), async (req, res) => {
   const { email, otp, password, name } = req.body;
 
   if (!email || !otp || !password || !name) {
@@ -71,7 +72,7 @@ router.post('/verify-registration', async (req, res) => {
 
 // POST /api/auth/forgot-password — sends an OTP to the account's email so it
 // can be used (via /reset-password) to set a new password.
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', createAuthRateLimiter(), async (req, res) => {
   const { email } = req.body;
 
   if (!email) {
@@ -101,7 +102,7 @@ router.post('/forgot-password', async (req, res) => {
 
 // POST /api/auth/reset-password — verifies the OTP from /forgot-password and
 // sets a new password, then signs the user in.
-router.post('/reset-password', async (req, res) => {
+router.post('/reset-password', createAuthRateLimiter(), async (req, res) => {
   const { email, otp, password } = req.body;
 
   if (!email || !otp || !password) {
@@ -139,7 +140,7 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', createAuthRateLimiter(), async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
