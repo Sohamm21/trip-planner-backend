@@ -105,7 +105,7 @@ router.post('/:id/media/upload-urls', requireMembership(['admin', 'editor']), as
     const uploads = [];
 
     for (let i = 0; i < count; i++) {
-      const storagePath = `${id}/${Date.now()}-${i}`; // no extension needed, Storage keys off Content-Type
+      const storagePath = `${id}/${crypto.randomUUID()}`; // no extension needed, Storage keys off Content-Type
 
       const { data, error } = await supabase.storage.from('trip-media').createSignedUploadUrl(storagePath);
 
