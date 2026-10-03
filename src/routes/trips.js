@@ -1,27 +1,40 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const multer = require('multer');
-const { compareAsc, compareDesc } = require('date-fns');
-const supabase = require('../lib/supabase');
-const authenticate = require('../middleware/authenticate');
-const { requireMembership } = require('../lib/tripAccess');
-const { dateStringFromEpoch, epochFromDate } = require('../lib/dateUtils');
-const { parseJsonQuery, applyFiltersInMemory } = require('../lib/queryFilters');
+const multer = require("multer");
+const { compareAsc, compareDesc } = require("date-fns");
+const supabase = require("../lib/supabase");
+const authenticate = require("../middleware/authenticate");
+const { requireMembership } = require("../lib/tripAccess");
+const { dateStringFromEpoch, epochFromDate } = require("../lib/dateUtils");
+const { parseJsonQuery, applyFiltersInMemory } = require("../lib/queryFilters");
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
-const TRIP_FILTER_FIELDS = { status: 'status', tripStatus: 'tripStatus' };
+const TRIP_FILTER_FIELDS = { status: "status", tripStatus: "tripStatus" };
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
-const DEFAULT_COVER_IMAGE = 'https://res.cloudinary.com/dyrv985gb/image/upload/v1790399857/BhatakGo/mountains_night.jpg';
+const DEFAULT_COVER_IMAGE =
+  "https://res.cloudinary.com/dyrv985gb/image/upload/v1790399857/BhatakGo/mountains_night.jpg";
 
 router.use(authenticate);
 
 // Converts a trip row's date/timestamp columns to epoch ms for API responses.
+// Share fields are never returned here; see shares.js.
 function formattedTripPayload(trip) {
+  const {
+    share_token,
+    share_enabled,
+    share_role,
+    share_expires_at,
+    ...publicTrip
+  } = trip;
+
   return {
-    ...trip,
+    ...publicTrip,
     start_date: epochFromDate(trip.start_date),
     end_date: epochFromDate(trip.end_date),
     created_at: epochFromDate(trip.created_at),
@@ -37,7 +50,9 @@ function withPublicCoverImage(trip) {
   if (!trip.cover_image) return trip;
   if (/^https?:\/\//i.test(trip.cover_image)) return trip;
 
-  const { data } = supabase.storage.from('trip-covers').getPublicUrl(trip.cover_image);
+  const { data } = supabase.storage
+    .from("trip-covers")
+    .getPublicUrl(trip.cover_image);
 
   return { ...trip, cover_image: data.publicUrl };
 }
@@ -45,25 +60,30 @@ function withPublicCoverImage(trip) {
 // GET /api/trips — all trips where the logged-in user is a member. Paginated + filterable
 // via ?jsonQuery={"page":1,"limit":20,"filters":[{"key":"tripStatus","operator":"eq","value":"UPCOMING"}]}.
 // `counts` always reflects ALL of the user's trips, unaffected by filters/pagination.
-router.get('/getTrips', async (req, res) => {
+router.get("/getTrips", async (req, res) => {
   const { jsonQuery, error: queryError } = parseJsonQuery(req);
   if (queryError) return res.status(400).json({ error: queryError });
 
   const page = Math.max(parseInt(jsonQuery.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(jsonQuery.limit, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const limit = Math.min(
+    Math.max(parseInt(jsonQuery.limit, 10) || DEFAULT_PAGE_SIZE, 1),
+    MAX_PAGE_SIZE,
+  );
 
   try {
     const { data, error } = await supabase
-      .from('trip_members')
-      .select(`
+      .from("trip_members")
+      .select(
+        `
         role,
         trips (
           id, name, description, destination,
           start_date, end_date, cover_image, status,
           created_by, created_at
         )
-      `)
-      .eq('user_id', req.user.id);
+      `,
+      )
+      .eq("user_id", req.user.id);
 
     if (error) return res.status(400).json({ error: error.message });
 
@@ -75,11 +95,15 @@ router.get('/getTrips', async (req, res) => {
       const end = new Date(row.trips.end_date);
 
       let tripStatus;
-      if (end < today) tripStatus = 'COMPLETED';
-      else if (start > today) tripStatus = 'UPCOMING';
-      else tripStatus = 'ONGOING';
+      if (end < today) tripStatus = "COMPLETED";
+      else if (start > today) tripStatus = "UPCOMING";
+      else tripStatus = "ONGOING";
 
-      return { ...formattedTripPayload(row.trips), my_role: row.role, tripStatus };
+      return {
+        ...formattedTripPayload(row.trips),
+        my_role: row.role,
+        tripStatus,
+      };
     });
 
     const trips = tripsWithStatus.map(withPublicCoverImage);
@@ -89,7 +113,8 @@ router.get('/getTrips', async (req, res) => {
     // trips into per-status sections anyway, so only the order within each status matters.
     trips.sort((a, b) => {
       if (a.tripStatus !== b.tripStatus) return 0;
-      if (a.tripStatus === 'COMPLETED') return compareDesc(new Date(a.end_date), new Date(b.end_date));
+      if (a.tripStatus === "COMPLETED")
+        return compareDesc(new Date(a.end_date), new Date(b.end_date));
       return compareAsc(new Date(a.start_date), new Date(b.start_date));
     });
 
@@ -98,12 +123,16 @@ router.get('/getTrips', async (req, res) => {
         acc[trip.tripStatus] = (acc[trip.tripStatus] || 0) + 1;
         return acc;
       },
-      { UPCOMING: 0, ONGOING: 0, COMPLETED: 0 }
+      { UPCOMING: 0, ONGOING: 0, COMPLETED: 0 },
     );
 
     let filtered;
     try {
-      filtered = applyFiltersInMemory(trips, jsonQuery.filters, TRIP_FILTER_FIELDS);
+      filtered = applyFiltersInMemory(
+        trips,
+        jsonQuery.filters,
+        TRIP_FILTER_FIELDS,
+      );
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
     }
@@ -127,20 +156,25 @@ router.get('/getTrips', async (req, res) => {
 // POST /api/trips/createTrip — create a new trip
 // currency is set-once here — there's deliberately no way to change it later (e.g. via
 // PATCH /:id/update), since expense splits/balances assume a trip's currency never moves.
-router.post('/createTrip', upload.single('image'), async (req, res) => {
-  const { name, destination, start_date, end_date, currency, image_url } = req.body;
+router.post("/createTrip", upload.single("image"), async (req, res) => {
+  const { name, destination, start_date, end_date, currency, image_url } =
+    req.body;
 
   if (!name || !start_date || !end_date) {
-    return res.status(400).json({ error: 'name, start_date and end_date are required' });
+    return res
+      .status(400)
+      .json({ error: "name, start_date and end_date are required" });
   }
 
   if (currency && String(currency).length !== 3) {
-    return res.status(400).json({ error: 'currency must be a 3-letter code (e.g. INR, USD)' });
+    return res
+      .status(400)
+      .json({ error: "currency must be a 3-letter code (e.g. INR, USD)" });
   }
 
   try {
     const { data: trip, error } = await supabase
-      .from('trips')
+      .from("trips")
       .insert({
         name,
         start_date: dateStringFromEpoch(start_date),
@@ -156,55 +190,63 @@ router.post('/createTrip', upload.single('image'), async (req, res) => {
     if (error) return res.status(400).json({ error: error.message });
 
     const { error: memberError } = await supabase
-      .from('trip_members')
-      .insert({ trip_id: trip.id, user_id: req.user.id, role: 'admin' });
+      .from("trip_members")
+      .insert({ trip_id: trip.id, user_id: req.user.id, role: "admin" });
 
-    if (memberError) return res.status(400).json({ error: memberError.message });
+    if (memberError)
+      return res.status(400).json({ error: memberError.message });
 
     // The cover image path is keyed by trip id (see PATCH /:id/update below), so
     // it can only be uploaded after the insert above produces one.
     let finalTrip = trip;
 
     if (req.file) {
-      const filePath = `${trip.id}/${Date.now()}.${req.file.mimetype.split('/')[1]}`;
+      const filePath = `${trip.id}/${Date.now()}.${req.file.mimetype.split("/")[1]}`;
 
       const { error: uploadError } = await supabase.storage
-        .from('trip-covers')
-        .upload(filePath, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
+        .from("trip-covers")
+        .upload(filePath, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: true,
+        });
 
-      if (uploadError) return res.status(400).json({ error: uploadError.message });
+      if (uploadError)
+        return res.status(400).json({ error: uploadError.message });
 
       const { data: updatedTrip, error: coverUpdateError } = await supabase
-        .from('trips')
+        .from("trips")
         .update({ cover_image: filePath })
-        .eq('id', trip.id)
+        .eq("id", trip.id)
         .select()
         .single();
 
-      if (coverUpdateError) return res.status(400).json({ error: coverUpdateError.message });
+      if (coverUpdateError)
+        return res.status(400).json({ error: coverUpdateError.message });
 
       finalTrip = updatedTrip;
     }
 
-    res.status(201).json({ trip: withPublicCoverImage(formattedTripPayload(finalTrip)) });
+    res
+      .status(201)
+      .json({ trip: withPublicCoverImage(formattedTripPayload(finalTrip)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET /api/trips/:id/details — single trip details
-router.get('/:id/details', requireMembership(), async (req, res) => {
+router.get("/:id/details", requireMembership(), async (req, res) => {
   const { id } = req.params;
 
   try {
     const { data: trip, error } = await supabase
-      .from('trips')
-      .select('*')
-      .eq('id', id)
+      .from("trips")
+      .select("*")
+      .eq("id", id)
       .single();
 
     if (error || !trip) {
-      return res.status(404).json({ error: 'Trip not found' });
+      return res.status(404).json({ error: "Trip not found" });
     }
 
     const today = new Date();
@@ -213,9 +255,9 @@ router.get('/:id/details', requireMembership(), async (req, res) => {
     const end = new Date(trip.end_date);
 
     let tripStatus;
-    if (end < today) tripStatus = 'COMPLETED';
-    else if (start > today) tripStatus = 'UPCOMING';
-    else tripStatus = 'ONGOING';
+    if (end < today) tripStatus = "COMPLETED";
+    else if (start > today) tripStatus = "UPCOMING";
+    else tripStatus = "ONGOING";
 
     const shaped = withPublicCoverImage(formattedTripPayload(trip));
 
@@ -226,41 +268,52 @@ router.get('/:id/details', requireMembership(), async (req, res) => {
 });
 
 // PATCH /api/trips/:id/update — update name, dates, and/or cover image
-router.patch('/:id/update', requireMembership(['admin']), upload.single('image'), async (req, res) => {
-  const { id } = req.params;
+router.patch(
+  "/:id/update",
+  requireMembership(["admin"]),
+  upload.single("image"),
+  async (req, res) => {
+    const { id } = req.params;
 
-  try {
-    const updates = {};
-    if (req.body.name) updates.name = req.body.name;
-    if (req.body.start_date) updates.start_date = dateStringFromEpoch(req.body.start_date);
-    if (req.body.end_date) updates.end_date = dateStringFromEpoch(req.body.end_date);
+    try {
+      const updates = {};
+      if (req.body.name) updates.name = req.body.name;
+      if (req.body.start_date)
+        updates.start_date = dateStringFromEpoch(req.body.start_date);
+      if (req.body.end_date)
+        updates.end_date = dateStringFromEpoch(req.body.end_date);
 
-    if (req.file) {
-      const filePath = `${id}/${Date.now()}.${req.file.mimetype.split('/')[1]}`;
+      if (req.file) {
+        const filePath = `${id}/${Date.now()}.${req.file.mimetype.split("/")[1]}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('trip-covers')
-        .upload(filePath, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
+        const { error: uploadError } = await supabase.storage
+          .from("trip-covers")
+          .upload(filePath, req.file.buffer, {
+            contentType: req.file.mimetype,
+            upsert: true,
+          });
 
-      if (uploadError) return res.status(400).json({ error: uploadError.message });
+        if (uploadError)
+          return res.status(400).json({ error: uploadError.message });
 
-      updates.cover_image = filePath;
+        updates.cover_image = filePath;
+      }
+
+      const { data: trip, error } = await supabase
+        .from("trips")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+
+      res.json({ trip: withPublicCoverImage(formattedTripPayload(trip)) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
-
-    const { data: trip, error } = await supabase
-      .from('trips')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    res.json({ trip: withPublicCoverImage(formattedTripPayload(trip)) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  },
+);
 
 // Removes every stored object under a trip's folder in a bucket (both
 // trip-covers and trip-media key their files as `${tripId}/...`). Best-effort:
@@ -268,10 +321,14 @@ router.patch('/:id/update', requireMembership(['admin']), upload.single('image')
 // cascades from it) from being deleted.
 async function clearTripBucketFolder(bucket, tripId) {
   try {
-    const { data: files, error } = await supabase.storage.from(bucket).list(tripId);
+    const { data: files, error } = await supabase.storage
+      .from(bucket)
+      .list(tripId);
     if (error || !files || files.length === 0) return;
 
-    await supabase.storage.from(bucket).remove(files.map((file) => `${tripId}/${file.name}`));
+    await supabase.storage
+      .from(bucket)
+      .remove(files.map((file) => `${tripId}/${file.name}`));
   } catch (err) {
     console.error(`Failed to clear ${bucket}/${tripId}:`, err);
   }
@@ -280,32 +337,39 @@ async function clearTripBucketFolder(bucket, tripId) {
 // DELETE /api/trips/:id — delete a trip. Creator-only, deliberately NOT just "any admin":
 // other collaborators can hold role: 'admin' once invites exist, but deletion stays
 // reserved for whoever originally created the trip.
-router.delete('/:id', async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
     const { data: trip, error } = await supabase
-      .from('trips')
-      .select('id, created_by')
-      .eq('id', id)
+      .from("trips")
+      .select("id, created_by")
+      .eq("id", id)
       .single();
 
-    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+    if (error || !trip)
+      return res.status(404).json({ error: "Trip not found" });
 
     if (trip.created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Only the trip creator can delete this trip' });
+      return res
+        .status(403)
+        .json({ error: "Only the trip creator can delete this trip" });
     }
 
-    const { error: deleteError } = await supabase.from('trips').delete().eq('id', id);
+    const { error: deleteError } = await supabase
+      .from("trips")
+      .delete()
+      .eq("id", id);
 
-    if (deleteError) return res.status(400).json({ error: deleteError.message });
+    if (deleteError)
+      return res.status(400).json({ error: deleteError.message });
 
     await Promise.all([
-      clearTripBucketFolder('trip-covers', id),
-      clearTripBucketFolder('trip-media', id),
+      clearTripBucketFolder("trip-covers", id),
+      clearTripBucketFolder("trip-media", id),
     ]);
 
-    res.status(200).json({ message: 'Trip deleted', id });
+    res.status(200).json({ message: "Trip deleted", id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -314,30 +378,36 @@ router.delete('/:id', async (req, res) => {
 // POST /api/trips/:id/leave — any member removes themselves from a trip. The
 // creator can't leave this way (they'd orphan the trip with no one able to
 // delete it) — they must delete the trip instead.
-router.post('/:id/leave', requireMembership(), async (req, res) => {
+router.post("/:id/leave", requireMembership(), async (req, res) => {
   const { id } = req.params;
 
   try {
     const { data: trip, error } = await supabase
-      .from('trips')
-      .select('id, created_by')
-      .eq('id', id)
+      .from("trips")
+      .select("id, created_by")
+      .eq("id", id)
       .single();
 
-    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+    if (error || !trip)
+      return res.status(404).json({ error: "Trip not found" });
 
     if (trip.created_by === req.user.id) {
-      return res.status(400).json({ error: 'The trip creator can\'t leave — delete the trip instead' });
+      return res
+        .status(400)
+        .json({
+          error: "The trip creator can't leave — delete the trip instead",
+        });
     }
 
     const { error: deleteError } = await supabase
-      .from('trip_members')
+      .from("trip_members")
       .delete()
-      .eq('id', req.membership.id);
+      .eq("id", req.membership.id);
 
-    if (deleteError) return res.status(400).json({ error: deleteError.message });
+    if (deleteError)
+      return res.status(400).json({ error: deleteError.message });
 
-    res.status(200).json({ message: 'Left trip' });
+    res.status(200).json({ message: "Left trip" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

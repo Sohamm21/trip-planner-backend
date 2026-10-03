@@ -15,4 +15,15 @@ function createAuthRateLimiter() {
   });
 }
 
-module.exports = { createAuthRateLimiter };
+// Limits anonymous scraping of the share preview endpoint.
+function createShareRateLimiter() {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please try again later.' },
+  });
+}
+
+module.exports = { createAuthRateLimiter, createShareRateLimiter };

@@ -27,6 +27,8 @@ app.use('/api/trips', require('./routes/media'));
 app.use('/api/trips', require('./routes/stays'));
 app.use('/api/trips', require('./routes/places'));
 app.use('/api/trips', require('./routes/notes'));
+app.use('/api/trips', require('./routes/shares').tripShareRouter);
+app.use('/api/shares', require('./routes/shares').shareRouter);
 app.use('/api/invites', require('./routes/invites'));
 app.use('/api/destinations', require('./routes/destinations'));
 app.use('/api/profile', require('./routes/profile'));
